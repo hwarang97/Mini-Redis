@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from textwrap import dedent
 from time import perf_counter
 from typing import Any
 from typing import Callable
@@ -28,6 +29,16 @@ class CLIClient:
     _GREEN = "\033[32m"
     _YELLOW = "\033[33m"
     _CYAN = "\033[36m"
+    _ACCENT = "\033[33m"
+    _ASCII_ART = dedent(
+        """
+         __  __ _       _      ____          _ _
+        |  \/  (_)_ __ (_)    |  _ \ ___  __| (_)___
+        | |\/| | | '_ \| |____| |_) / _ \/ _` | / __|
+        | |  | | | | | | |____|  _ <  __/ (_| | \__ \\
+        |_|  |_|_|_| |_|_|    |_| \_\___|\__,_|_|___/
+        """
+    ).strip("\n")
 
     def __init__(
         self,
@@ -141,10 +152,13 @@ class CLIClient:
 
     def _print_banner(self) -> None:
         self._emit("")
-        self._emit(self._tone("============================================================", self._CYAN))
-        self._emit(self._tone(" Mini Redis Presentation CLI", self._CYAN, bold=True))
-        self._emit(self._tone(" RESP | TTL | Persistence | Invalidation | Mongo Sync", self._CYAN))
-        self._emit(self._tone("============================================================", self._CYAN))
+        for line in self._ASCII_ART.splitlines():
+            self._emit(self._tone(line, self._ACCENT))
+        self._emit("")
+        self._emit(self._tone("=======================================================", self._ACCENT))
+        self._emit(self._tone(" Mini Redis Presentation CLI", self._ACCENT, bold=True))
+        self._emit(self._tone(" RESP | TTL | Persistence | Invalidation | Mongo Sync", self._ACCENT))
+        self._emit(self._tone("=======================================================", self._ACCENT))
         self._emit(f" server : {self._host}:{self._port}")
         self._emit(" focus  : demo-friendly terminal UX with local shortcuts")
         self._emit("")
@@ -164,20 +178,20 @@ class CLIClient:
         self._emit("")
 
     def _print_help(self) -> None:
-        self._emit(self._tone("Presenter Shortcuts", self._CYAN, bold=True))
+        self._emit(self._tone("Presenter Shortcuts", self._ACCENT, bold=True))
         self._emit("  .help   Show this help")
         self._emit("  .demo   Print a recommended live demo sequence")
         self._emit("  .clear  Clear the terminal")
         self._emit("  .exit   Exit the CLI without sending QUIT")
         self._emit("")
-        self._emit(self._tone("Tip", self._CYAN, bold=True))
+        self._emit(self._tone("Tip", self._ACCENT, bold=True))
         self._emit("  Lines starting with # are ignored, so you can annotate your demo script.")
         self._emit("  Use quoted strings for values with spaces, for example:")
         self._emit('    SET user:1 "hello mini redis" TAGS user:1 demo')
         self._emit("")
 
     def _print_demo(self) -> None:
-        self._emit(self._tone("Suggested Demo Flow", self._CYAN, bold=True))
+        self._emit(self._tone("Suggested Demo Flow", self._ACCENT, bold=True))
         self._emit("  # connectivity")
         self._emit("  PING")
         self._emit("  HELP")
@@ -200,7 +214,7 @@ class CLIClient:
         self._emit("")
 
     def _build_prompt(self) -> str:
-        return self._tone(f"mini-redis[{self._prompt_index:02d}]> ", self._CYAN, bold=True)
+        return self._tone(f"mini-redis[{self._prompt_index:02d}]> ", self._ACCENT, bold=True)
 
     def _render_response(
         self,

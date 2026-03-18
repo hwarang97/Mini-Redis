@@ -49,6 +49,7 @@ class CLIClientTest(unittest.TestCase):
         client.run()
 
         rendered = "\n".join(outputs)
+        self.assertIn("__  __ _       _", rendered)
         self.assertIn("Mini Redis Presentation CLI", rendered)
         self.assertIn("status : READY", rendered)
         self.assertIn("Presenter Shortcuts", rendered)
