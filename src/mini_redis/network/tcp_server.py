@@ -17,11 +17,8 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         while True:
             try:
-                # Read one RESP command at a time from the current socket.
                 command = self.codec.decode_command_stream(self.rfile)
-            except ValueError:
-                # Stop serving this client when the peer closes the socket or sends
-                # an incomplete frame; the outer server loop keeps accepting others.
+            except (OSError, ValueError):
                 return
 
             response = self.manager.execute(command)

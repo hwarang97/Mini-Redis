@@ -58,6 +58,33 @@ class CommandFlowTest(unittest.TestCase):
 
         self.assertEqual(manager.execute({"name": "KEYS", "args": []}), ["a", "b"])
 
+    def test_help_lists_supported_commands(self) -> None:
+        manager = self.build_manager()
+
+        help_lines = manager.execute({"name": "HELP", "args": []})
+        self.assertIn("HELP [command] - show supported commands or one command summary", help_lines)
+        self.assertIn(
+            "DUMPALL - show all live keys with values, ttl, and tags",
+            help_lines,
+        )
+
+        self.assertEqual(
+            manager.execute({"name": "HELP", "args": ["get"]}),
+            "GET <key> - read a single value",
+        )
+
+    def test_dumpall_returns_live_values_ttl_and_tags(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["profile", "hello", "TAGS", "user:1", "demo"]})
+        manager.execute({"name": "SET", "args": ["session", "live", "EX", "30", "TAGS", "user:1"]})
+
+        lines = manager.execute({"name": "DUMPALL", "args": []})
+
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "key=profile value=hello ttl=persistent tags=demo,user:1")
+        self.assertIn("key=session value=live ttl=", lines[1])
+        self.assertTrue(lines[1].endswith("tags=user:1"))
+
     def test_incr_and_mget(self) -> None:
         manager = self.build_manager()
 
