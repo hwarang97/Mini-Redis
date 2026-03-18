@@ -32,6 +32,7 @@ Example commands:
 
 ```text
 PING
+HELP
 BGSAVE
 BGREWRITEAOF
 CONFIG GET *
@@ -49,6 +50,7 @@ INCR counter
 EXPIRE user:1 60
 TTL user:1
 KEYS
+DUMPALL
 SAVE
 LOAD
 REPAIRAOF
