@@ -9,6 +9,7 @@ from typing import Any
 
 from mini_redis.persistence.aof import AOFReadResult
 from mini_redis.persistence.aof import AOFWriter
+from mini_redis.persistence.meta import PersistenceMetadataStore
 from mini_redis.persistence.rdb import RDBSnapshotStore
 
 if TYPE_CHECKING:
@@ -28,10 +29,17 @@ class RecoveryReport:
 class PersistenceManager:
     """Coordinate append-only logging and snapshots."""
 
-    def __init__(self, aof_writer: AOFWriter, snapshot_store: RDBSnapshotStore) -> None:
+    def __init__(
+        self,
+        aof_writer: AOFWriter,
+        snapshot_store: RDBSnapshotStore,
+        metadata_store: PersistenceMetadataStore,
+    ) -> None:
         self._operation_log: list[tuple[object, ...]] = []
         self._aof_writer = aof_writer
         self._snapshot_store = snapshot_store
+        self._metadata_store = metadata_store
+        self._metadata = self._metadata_store.load()
         self._last_recovery_report = RecoveryReport(
             snapshot_loaded=False,
             replayed_entries=0,
@@ -79,6 +87,10 @@ class PersistenceManager:
             corrupted_aof_line=aof_result.corrupted_line,
         )
         self._last_recovery_report = report
+        self._write_metadata(
+            last_action="restore",
+            report=report,
+        )
         return report
 
     def load_snapshot(self, redis: "Redis") -> bool:
@@ -91,10 +103,13 @@ class PersistenceManager:
         self._operation_log = [
             tuple(entry) for entry in snapshot.get("operation_log", [])
         ]
+        self._write_metadata(last_action="load")
         return True
 
     def rewrite_aof(self, state_entries: list[dict[str, Any]]) -> Path:
-        return self._aof_writer.rewrite(state_entries)
+        path = self._aof_writer.rewrite(state_entries)
+        self._write_metadata(last_action="rewrite_aof")
+        return path
 
     def repair_aof(self) -> dict[str, Any]:
         result = self._aof_writer.repair()
@@ -107,11 +122,16 @@ class PersistenceManager:
                 ignored_aof_entries=0,
                 corrupted_aof_line=None,
             )
+        self._write_metadata(last_action="repair_aof", repair=result)
         return result
+
+    def record_snapshot_save(self) -> None:
+        self._write_metadata(last_action="save")
 
     def info(self) -> dict[str, Any]:
         aof_path = self._aof_writer._path
         snapshot_path = self._snapshot_store._path
+        metadata_path = self._metadata_store.path
         return {
             "aof_path": str(aof_path),
             "aof_exists": aof_path.exists(),
@@ -119,7 +139,10 @@ class PersistenceManager:
             "snapshot_path": str(snapshot_path),
             "snapshot_exists": snapshot_path.exists(),
             "snapshot_size": snapshot_path.stat().st_size if snapshot_path.exists() else 0,
+            "metadata_path": str(metadata_path),
+            "metadata_exists": metadata_path.exists(),
             "operation_log_length": len(self._operation_log),
+            "metadata": dict(self._metadata),
             "last_recovery": {
                 "snapshot_loaded": self._last_recovery_report.snapshot_loaded,
                 "replayed_entries": self._last_recovery_report.replayed_entries,
@@ -137,3 +160,29 @@ class PersistenceManager:
     @property
     def last_recovery_report(self) -> RecoveryReport:
         return self._last_recovery_report
+
+    def _write_metadata(
+        self,
+        *,
+        last_action: str,
+        report: RecoveryReport | None = None,
+        repair: dict[str, Any] | None = None,
+    ) -> None:
+        active_report = report or self._last_recovery_report
+        self._metadata = {
+            "last_action": last_action,
+            "operation_log_length": len(self._operation_log),
+            "snapshot_exists": self._snapshot_store._path.exists(),
+            "aof_exists": self._aof_writer._path.exists(),
+            "last_recovery": {
+                "snapshot_loaded": active_report.snapshot_loaded,
+                "replayed_entries": active_report.replayed_entries,
+                "recovered_keys": active_report.recovered_keys,
+                "aof_corruption_detected": active_report.aof_corruption_detected,
+                "ignored_aof_entries": active_report.ignored_aof_entries,
+                "corrupted_aof_line": active_report.corrupted_aof_line,
+            },
+        }
+        if repair is not None:
+            self._metadata["last_repair"] = dict(repair)
+        self._metadata_store.save(self._metadata)

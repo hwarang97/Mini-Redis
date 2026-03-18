@@ -22,11 +22,12 @@ from mini_redis.commands.handlers.save import SaveHandler
 from mini_redis.commands.handlers.set import SetHandler
 from mini_redis.commands.handlers.ttl import TTLHandler
 from mini_redis.commands.manager import CommandManager
-from mini_redis.config import APPEND_ONLY_FILE, SNAPSHOT_FILE
+from mini_redis.config import APPEND_ONLY_FILE, PERSISTENCE_META_FILE, SNAPSHOT_FILE
 from mini_redis.engine.redis import Redis
 from mini_redis.persistence.aof import AOFWriter
 from mini_redis.persistence.invalidation import InvalidationManager
 from mini_redis.persistence.manager import PersistenceManager
+from mini_redis.persistence.meta import PersistenceMetadataStore
 from mini_redis.persistence.rdb import RDBSnapshotStore
 from mini_redis.storage.manager import StorageManager
 from mini_redis.storage.mongo_adapter import MongoAdapter
@@ -36,12 +37,14 @@ from mini_redis.storage.ttl import TTLManager
 def build_command_manager(
     appendonly_path: Path | None = None,
     snapshot_path: Path | None = None,
+    metadata_path: Path | None = None,
 ) -> CommandManager:
     storage = StorageManager()
     ttl = TTLManager()
     persistence = PersistenceManager(
         aof_writer=AOFWriter(appendonly_path or APPEND_ONLY_FILE),
         snapshot_store=RDBSnapshotStore(snapshot_path or SNAPSHOT_FILE),
+        metadata_store=PersistenceMetadataStore(metadata_path or PERSISTENCE_META_FILE),
     )
     invalidation = InvalidationManager()
     mongo = MongoAdapter(enabled=False)

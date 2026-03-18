@@ -103,6 +103,7 @@ class Redis:
             "aof_offset": len(self._persistence.operation_log),
         }
         path = self._persistence.save_snapshot(snapshot)
+        self._persistence.record_snapshot_save()
         return str(path)
 
     def load(self) -> str:

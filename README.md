@@ -9,6 +9,7 @@ Python skeleton for a collaborative Mini Redis project with explicit module boun
 - Per-command handlers that invoke the internal `Redis` engine
 - Modular managers for storage, TTL, persistence, invalidation, and Mongo integration
 - File-backed AOF/RDB skeleton under `data/`
+- JSON metadata file for persistence lifecycle under `data/`
 
 ## Quick start
 

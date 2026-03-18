@@ -11,6 +11,7 @@ class CommandFlowTest(unittest.TestCase):
         base = Path(self.temp_dir.name)
         self.appendonly_path = base / "appendonly.aof"
         self.snapshot_path = base / "dump.rdb.json"
+        self.metadata_path = base / "persistence.meta.json"
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -19,6 +20,7 @@ class CommandFlowTest(unittest.TestCase):
         return build_command_manager(
             appendonly_path=self.appendonly_path,
             snapshot_path=self.snapshot_path,
+            metadata_path=self.metadata_path,
         )
 
     def test_basic_command_flow(self) -> None:
@@ -77,8 +79,10 @@ class CommandFlowTest(unittest.TestCase):
         self.assertEqual(info["key_count"], 1)
         self.assertTrue(info["snapshot_exists"])
         self.assertTrue(info["aof_exists"])
+        self.assertTrue(info["metadata_exists"])
         self.assertGreaterEqual(info["operation_log_length"], 1)
         self.assertIn("last_recovery", info)
+        self.assertEqual(info["metadata"]["last_action"], "save")
 
     def test_save_and_flushdb(self) -> None:
         manager = self.build_manager()
@@ -87,6 +91,7 @@ class CommandFlowTest(unittest.TestCase):
         snapshot_path = Path(manager.execute({"name": "SAVE", "args": []}))
         self.assertEqual(snapshot_path, self.snapshot_path)
         self.assertTrue(snapshot_path.exists())
+        self.assertTrue(self.metadata_path.exists())
         self.assertEqual(manager.execute({"name": "FLUSHDB", "args": []}), 1)
         self.assertEqual(manager.execute({"name": "KEYS", "args": []}), [])
         self.assertTrue(self.appendonly_path.exists())
@@ -166,6 +171,18 @@ class CommandFlowTest(unittest.TestCase):
         self.assertTrue(result["corruption_detected"])
         self.assertEqual(result["ignored_entries"], 1)
         self.assertEqual(self.appendonly_path.read_text(encoding="utf-8"), original)
+        metadata = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})["metadata"]
+        self.assertEqual(metadata["last_action"], "repair_aof")
+        self.assertEqual(metadata["last_repair"]["ignored_entries"], 1)
+
+    def test_restore_persists_recovery_metadata_file(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+
+        restored = self.build_manager()
+        self.assertTrue(self.metadata_path.exists())
+        info = restored.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+        self.assertEqual(info["metadata"]["last_action"], "restore")
 
     def test_repair_aof_is_noop_for_clean_file(self) -> None:
         manager = self.build_manager()
