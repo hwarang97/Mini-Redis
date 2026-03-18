@@ -172,7 +172,9 @@ class MongoIntegrationTest(unittest.TestCase):
         )
 
         info = manager.execute({"name": "INFO", "args": ["MONGO"]})
-        self.assertEqual(info["operation_count"], 0)
+        self.assertIn("# Mongo", info)
+        self.assertIn("operation_count:0", info)
+        self.assertIn("key_count:1", info)
 
     def test_benchmark_suite_measures_redis_and_mongo_separately(self) -> None:
         from mini_redis.storage.manager import StorageManager
@@ -213,11 +215,12 @@ class MongoIntegrationTest(unittest.TestCase):
 
         info = manager.execute({"name": "INFO", "args": ["MONGO"]})
 
-        self.assertTrue(info["enabled"])
-        self.assertTrue(info["connected"])
-        self.assertEqual(info["database"], "mini_redis")
-        self.assertEqual(info["collection"], "kv_store")
-        self.assertEqual(info["operation_count"], 0)
+        self.assertIn("# Mongo", info)
+        self.assertIn("enabled:True", info)
+        self.assertIn("connected:True", info)
+        self.assertIn("database:mini_redis", info)
+        self.assertIn("collection:kv_store", info)
+        self.assertIn("operation_count:0", info)
 
 
 if __name__ == "__main__":

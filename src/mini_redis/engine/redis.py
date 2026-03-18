@@ -162,7 +162,8 @@ class Redis:
         if normalized == "MONGO":
             payload = self._mongo.info()
             payload["key_count"] = self.key_count()
-            return payload
+            # INFO 응답은 RESP에서 안전하게 직렬화될 수 있도록 섹션별 문자열 포맷으로 통일한다.
+            return self._format_info_payload("Mongo", payload)
         return "ERR unsupported INFO section"
 
     def config_get(self, key: str) -> list[str] | str:
