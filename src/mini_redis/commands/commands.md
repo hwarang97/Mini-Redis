@@ -11,7 +11,7 @@
 | `PING` | `PING` | `PONG` | 서버 상태를 확인하는 기본 헬스체크 커맨드입니다. |
 | `HELP` | `HELP [command]` | 문자열 또는 문자열 목록 | 전체 커맨드 도움말 목록이나 특정 커맨드 한 줄 설명을 반환합니다. |
 | `QUIT` | `QUIT` | `BYE` | CLI 클라이언트를 종료할 때 사용합니다. |
-| `SET` | `SET <key> <value> [EX <seconds>] [TAGS <tag...>]` | `OK` | TTL과 invalidation 태그를 선택적으로 함께 설정할 수 있습니다. |
+| `SET` | `SET <key> <value> [EX <seconds>] [TAGS <tag...>]` | `OK` 또는 `OK mongo_write=<seconds>s` | TTL과 invalidation 태그를 선택적으로 함께 설정할 수 있고, Mongo sync가 켜져 있으면 Mongo 저장 완료 시간도 함께 보여줍니다. |
 | `GET` | `GET <key>` | `<value>` 또는 `None` | 키가 없거나 만료된 경우 `None`을 반환합니다. |
 | `DELETE` | `DELETE <key>` | `1` 또는 `0` | 키를 삭제했으면 `1`, 없어서 삭제하지 못했으면 `0`을 반환합니다. |
 | `EXISTS` | `EXISTS <key>` | `1` 또는 `0` | 현재 키가 존재하는지 여부를 반환합니다. |
@@ -50,7 +50,7 @@
 | 커맨드 | 문법 | 반환값 | 설명 |
 | --- | --- | --- | --- |
 | `INFO` | `INFO PERSISTENCE` | 포맷된 문자열 | persistence 메타데이터, 키 개수, 복구 정책, 백그라운드 작업 상태를 포함합니다. |
-| `INFO` | `INFO MONGO` | 딕셔너리 | Mongo 동기화 상태와 연결 메타데이터를 포함합니다. |
+| `INFO` | `INFO MONGO` | 딕셔너리 | Mongo 동기화 상태, 연결 메타데이터, 마지막 write 시간 정보를 포함합니다. |
 | `CONFIG` | `CONFIG GET <key>` | 평탄한 리스트 또는 에러 문자열 | `CONFIG GET *`를 사용하면 지원되는 런타임 설정 전체를 조회할 수 있습니다. |
 | `CONFIG` | `CONFIG SET <key> <value>` | `OK` 또는 에러 문자열 | 지원되는 런타임 설정 값을 변경합니다. |
 

@@ -50,7 +50,8 @@ class Redis:
             self._invalidation.set_tags(key, tags)
         # Persist tags together with the value so snapshot/AOF replay keeps invalidation semantics.
         self._persistence.append("SET", key, value, ttl_seconds, tags)
-        return "OK"
+        mongo_write_elapsed = self._mongo.write_value(key, value)
+        return self._format_set_response(mongo_write_elapsed)
 
     def delete(self, key: str) -> int:
         self._ttl.clear_expiration(key)
@@ -58,6 +59,8 @@ class Redis:
         self._invalidation.clear_key(key)
         deleted = 1 if self._storage.delete(key) else 0
         self._persistence.append("DELETE", key)
+        if deleted:
+            self._mongo.delete_key(key)
         return deleted
 
     def exists(self, key: str) -> int:
@@ -111,6 +114,7 @@ class Redis:
 
         self._storage.set(key, str(next_value))
         self._persistence.append("INCR", key)
+        self._mongo.write_value(key, str(next_value))
         return next_value
 
     def flushdb(self) -> int:
@@ -119,6 +123,7 @@ class Redis:
         # FLUSHDB must wipe secondary indexes too or later INVALIDATE calls can see stale keys.
         self._invalidation.clear_all()
         self._persistence.append("FLUSHDB")
+        self._mongo.clear()
         return removed
 
     def invalidate(self, tag: str) -> int:
@@ -295,3 +300,8 @@ class Redis:
         for key, value in payload.items():
             append_lines(str(key), value)
         return "\r\n".join(lines)
+
+    def _format_set_response(self, mongo_write_elapsed: float | None) -> str:
+        if mongo_write_elapsed is None:
+            return "OK"
+        return f"OK mongo_write={mongo_write_elapsed:.6f}s"

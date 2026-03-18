@@ -1,19 +1,20 @@
 # MongoDB와 Redis 저장 경로 분리 구조
 
-이 프로젝트는 이제 Redis 저장 경로와 MongoDB 저장 경로를 자동으로 묶지 않는다.
+이 프로젝트는 Redis를 주 저장소로 유지하면서, 선택적으로 MongoDB에 write-through 동기화를 붙일 수 있다.
 
 ## 핵심 의도
 
 - Redis는 메모리 저장소와 TTL, persistence(AOF/RDB)에만 집중한다.
 - MongoDB는 별도 저장소/외부 시스템으로 취급한다.
-- 따라서 `SET`, `INCR`, `DELETE`, `FLUSHDB` 같은 Redis 명령이 실행되어도 MongoDB에 자동 반영되지 않는다.
+- `MINI_REDIS_MONGO_ENABLED=1` 로 Mongo 동기화를 켜면 `SET`, `INCR`, `DELETE`, `FLUSHDB` 가 MongoDB에도 반영된다.
+- `SET` 응답은 `OK mongo_write=<seconds>s` 형식으로 MongoDB 저장 완료 시간을 함께 보여준다.
 - MongoDB 성능과 Redis 메모리 성능을 각각 독립적으로 측정할 수 있다.
 
 ## 현재 역할 분리
 
 - `src/mini_redis/engine/redis.py`
   Redis 명령 실행과 메모리 저장소, TTL, persistence를 오케스트레이션한다.
-  더 이상 MongoDB write/delete/clear를 직접 호출하지 않는다.
+  Mongo sync가 켜져 있으면 `MongoManager`를 통해 MongoDB write/delete/clear를 호출한다.
 
 - `src/mini_redis/storage/manager.py`
   Redis용 in-memory hash table 저장소다.

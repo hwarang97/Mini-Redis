@@ -145,8 +145,9 @@ class MongoIntegrationTest(unittest.TestCase):
             [("upsert", "user:1"), ("delete", "user:1"), ("clear", None)],
         )
         self.assertEqual(manager.info()["operation_count"], 3)
+        self.assertIsNotNone(manager.info()["last_write_duration_seconds"])
 
-    def test_redis_commands_do_not_auto_sync_to_mongo(self) -> None:
+    def test_redis_commands_sync_to_mongo_and_report_set_latency(self) -> None:
         base = Path("data/test-mongo-info")
         base.mkdir(parents=True, exist_ok=True)
         appendonly_path = base / "appendonly.aof"
@@ -166,14 +167,14 @@ class MongoIntegrationTest(unittest.TestCase):
             mongo_client_factory=FakeMongoClient,
         )
 
-        self.assertEqual(
-            manager.execute({"name": "SET", "args": ["user:1", "hello"]}),
-            "OK",
-        )
+        result = manager.execute({"name": "SET", "args": ["user:1", "hello"]})
+        self.assertTrue(str(result).startswith("OK mongo_write="))
 
         info = manager.execute({"name": "INFO", "args": ["MONGO"]})
         self.assertIn("# Mongo", info)
-        self.assertIn("operation_count:0", info)
+        self.assertIn("operation_count:1", info)
+        self.assertIn("last_write_duration_seconds:", info)
+        self.assertIn("last_write_duration_ms:", info)
         self.assertIn("key_count:1", info)
 
     def test_benchmark_suite_measures_redis_and_mongo_separately(self) -> None:
@@ -221,6 +222,7 @@ class MongoIntegrationTest(unittest.TestCase):
         self.assertIn("database:mini_redis", info)
         self.assertIn("collection:kv_store", info)
         self.assertIn("operation_count:0", info)
+        self.assertIn("last_write_duration_seconds:None", info)
 
 
 if __name__ == "__main__":

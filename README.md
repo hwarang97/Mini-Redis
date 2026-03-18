@@ -98,5 +98,6 @@ Project defaults:
 - `MINI_REDIS_MONGO_COLLECTION`: `kv_store`
 - `MINI_REDIS_MONGO_SERVER_SELECTION_TIMEOUT_MS`: `2000`
 
-When enabled, `SET`, `INCR`, `DELETE`, and `FLUSHDB` will sync to MongoDB and
-`INFO MONGO` will show connection and collection metadata.
+When enabled, `SET`, `INCR`, `DELETE`, and `FLUSHDB` will sync to MongoDB.
+`SET` responses include the MongoDB write latency as `OK mongo_write=<seconds>s`,
+and `INFO MONGO` shows connection, collection, and last-write timing metadata.
