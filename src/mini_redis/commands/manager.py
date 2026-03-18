@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from mini_redis.persistence.manager import RecoveryReport
 from mini_redis.types import Command
 
 
@@ -15,8 +16,13 @@ class CommandHandler(Protocol):
 class CommandManager:
     """Validate and route commands to per-command handlers."""
 
-    def __init__(self, handlers: dict[str, CommandHandler]) -> None:
+    def __init__(
+        self,
+        handlers: dict[str, CommandHandler],
+        recovery_report: RecoveryReport | None = None,
+    ) -> None:
         self._handlers = handlers
+        self.recovery_report = recovery_report
 
     def execute(self, command: Command) -> object:
         name = command["name"].upper()

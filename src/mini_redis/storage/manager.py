@@ -87,6 +87,14 @@ class StorageManager:
         self._size = 0
         return removed
 
+    def load_items(self, values: dict[str, str]) -> None:
+        self._table = self._build_table(self._INITIAL_CAPACITY)
+        self._rehash_table = None
+        self._rehash_index = 0
+        self._size = 0
+        for key, value in values.items():
+            self.set(key, value)
+
     def _build_table(self, capacity: int) -> list[list[_Entry]]:
         return [[] for _ in range(max(capacity, self._INITIAL_CAPACITY))]
 
