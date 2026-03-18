@@ -39,6 +39,31 @@ class StorageManagerTest(unittest.TestCase):
         self.assertIsNone(storage._rehash_table)
         self.assertEqual(storage.get("key:7"), "value:7")
 
+    def test_inspect_reports_rehash_state_and_table_contents(self) -> None:
+        storage = StorageManager()
+        for index in range(4):
+            storage.set(f"key:{index}", f"value:{index}")
+
+        payload = storage.inspect(include_table=True)
+
+        self.assertTrue(payload["is_rehashing"])
+        self.assertEqual(payload["size"], 4)
+        self.assertGreater(payload["rehash_starts"], 0)
+        self.assertIn("latency", payload)
+        self.assertIn("table", payload)
+        self.assertEqual(payload["items"]["key:3"], "value:3")
+
+    def test_inspect_tracks_recent_operation_latency_samples(self) -> None:
+        storage = StorageManager()
+
+        storage.set("alpha", "1")
+        storage.get("alpha")
+        payload = storage.inspect()
+
+        self.assertEqual(payload["latency"]["samples"], 2)
+        self.assertIsNotNone(payload["latency"]["last_us"])
+        self.assertEqual(payload["recent_operations"][-1]["operation"], "get")
+
 
 if __name__ == "__main__":
     unittest.main()

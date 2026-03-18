@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from textwrap import dedent
 from time import perf_counter
 from typing import Any
@@ -31,7 +32,7 @@ class CLIClient:
     _CYAN = "\033[36m"
     _ACCENT = "\033[33m"
     _ASCII_ART = dedent(
-        """
+        r"""
          __  __ _       _      ____          _ _
         |  \/  (_)_ __ (_)    |  _ \ ___  __| (_)___
         | |\/| | | '_ \| |____| |_) / _ \/ _` | / __|
@@ -97,6 +98,18 @@ class CLIClient:
             if command is None:
                 continue
 
+            if command["name"] == "WATCH":
+                should_quit = self._run_watch_mode(command)
+                self._prompt_index += 1
+                if should_quit:
+                    break
+                continue
+
+            if command["name"] == "LIVESET":
+                self._run_liveset_mode(command)
+                self._prompt_index += 1
+                continue
+
             should_continue = self._run_server_command(command)
             self._prompt_index += 1
             if not should_continue:
@@ -150,6 +163,83 @@ class CLIClient:
         )
         return command["name"] != "QUIT"
 
+    def _run_watch_mode(self, command: Command) -> bool:
+        args = list(command["args"])
+        if not args:
+            self._emit(self._format_error("ERR wrong number of arguments for 'WATCH'"))
+            return False
+
+        interval_seconds = 0.5
+        iterations = 10
+        index = 0
+
+        if index < len(args):
+            try:
+                interval_seconds = float(args[index])
+                index += 1
+            except ValueError:
+                pass
+
+        if index < len(args):
+            try:
+                iterations = int(args[index])
+                index += 1
+            except ValueError:
+                pass
+
+        if index >= len(args):
+            self._emit(self._format_error("ERR WATCH requires a nested command"))
+            return False
+
+        nested_command = {"name": args[index].upper(), "args": args[index + 1 :]}
+        for iteration in range(1, iterations + 1):
+            response = self._tcp_client.send(nested_command)
+            self._emit(self._tone(f"[watch {iteration}/{iterations}]", self._CYAN, bold=True))
+            self._emit(self._codec.format_for_display(response))
+            if nested_command["name"] == "QUIT":
+                return True
+            if iteration != iterations:
+                time.sleep(interval_seconds)
+        return False
+
+    def _run_liveset_mode(self, command: Command) -> None:
+        args = list(command["args"])
+        if not args:
+            self._emit(self._format_error("ERR wrong number of arguments for 'LIVESET'"))
+            return
+
+        try:
+            count = int(args[0])
+        except ValueError:
+            self._emit(self._format_error("ERR LIVESET count must be an integer"))
+            return
+
+        interval_seconds = 0.0
+        key_prefix = "live:set:"
+        if len(args) >= 2:
+            try:
+                interval_seconds = float(args[1])
+            except ValueError:
+                key_prefix = args[1]
+        if len(args) >= 3:
+            key_prefix = args[2]
+        if len(args) > 3:
+            self._emit(self._format_error("ERR syntax error"))
+            return
+
+        for index in range(count):
+            generated_key = f"{key_prefix}{index}"
+            generated_value = str(index)
+            response = self._tcp_client.send(
+                {
+                    "name": "PROBE",
+                    "args": ["SET", generated_key, generated_value],
+                }
+            )
+            self._emit(str(response))
+            if interval_seconds > 0 and index + 1 != count:
+                time.sleep(interval_seconds)
+
     def _print_banner(self) -> None:
         self._emit("")
         for line in self._ASCII_ART.splitlines():
@@ -184,6 +274,10 @@ class CLIClient:
         self._emit("  .clear  Clear the terminal")
         self._emit("  .exit   Exit the CLI without sending QUIT")
         self._emit("")
+        self._emit(self._tone("Probe Helpers", self._ACCENT, bold=True))
+        self._emit("  WATCH <interval> <count> <command...>")
+        self._emit("  LIVESET <count> [interval] [key_prefix]")
+        self._emit("")
         self._emit(self._tone("Tip", self._ACCENT, bold=True))
         self._emit("  Lines starting with # are ignored, so you can annotate your demo script.")
         self._emit("  Use quoted strings for values with spaces, for example:")
@@ -211,6 +305,9 @@ class CLIClient:
         self._emit("  INFO PERSISTENCE")
         self._emit("  # optional mongo")
         self._emit("  INFO MONGO")
+        self._emit("  # storage probes")
+        self._emit("  INSPECT STORAGE RUN 20")
+        self._emit("  INSPECT STORAGE UPDATE 20")
         self._emit("")
 
     def _build_prompt(self) -> str:

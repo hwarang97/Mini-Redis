@@ -1,4 +1,7 @@
+import io
 import unittest
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 from mini_redis.cli.client import CLIClient
 from mini_redis.network.tcp_client import TimedResponse
@@ -22,6 +25,13 @@ class _FakeTCPClient:
             return TimedResponse(value=["hello", None, "42"], server_time_ms=0.083)
         if command["name"] == "INFO":
             return TimedResponse(value="# Persistence\r\nkey_count:1", server_time_ms=0.091)
+        if command["name"] == "INSPECT":
+            return TimedResponse(
+                value="[table size: 4] [resizing: False] [keys: 0] [rehash table size: 0] [progress: 1.0] [last request: n/a]",
+                server_time_ms=0.067,
+            )
+        if command["name"] == "PROBE":
+            return TimedResponse(value="OK", server_time_ms=0.071)
         if command["name"] == "QUIT":
             return TimedResponse(value="BYE", server_time_ms=0.033)
         return TimedResponse(
@@ -80,5 +90,55 @@ class CLIClientTest(unittest.TestCase):
         self.assertIn("Session closed.", rendered)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class CLIClientProbeModeTest(unittest.TestCase):
+    def test_watch_mode_replays_nested_command_multiple_times(self) -> None:
+        tcp_client = _FakeTCPClient()
+        client = CLIClient(
+            tcp_client=tcp_client,
+            codec=RespCodec(),
+            host="127.0.0.1",
+            port=6380,
+            use_color=False,
+        )
+
+        with patch("mini_redis.cli.client.time.sleep"), io.StringIO() as buffer:
+            with redirect_stdout(buffer):
+                should_quit = client._run_watch_mode(
+                    {"name": "WATCH", "args": ["0.01", "3", "INSPECT", "STORAGE"]}
+                )
+            output = buffer.getvalue()
+
+        self.assertFalse(should_quit)
+        self.assertEqual(
+            tcp_client.commands,
+            [{"name": "INSPECT", "args": ["STORAGE"]}] * 3,
+        )
+        self.assertIn("[watch 1/3]", output)
+        self.assertIn("[table size: 4]", output)
+
+    def test_liveset_mode_generates_probe_set_requests(self) -> None:
+        tcp_client = _FakeTCPClient()
+        client = CLIClient(
+            tcp_client=tcp_client,
+            codec=RespCodec(),
+            host="127.0.0.1",
+            port=6380,
+            use_color=False,
+        )
+
+        with patch("mini_redis.cli.client.time.sleep"), io.StringIO() as buffer:
+            with redirect_stdout(buffer):
+                client._run_liveset_mode(
+                    {"name": "LIVESET", "args": ["3", "0.01", "probe:live:"]}
+                )
+            output = buffer.getvalue()
+
+        self.assertEqual(
+            tcp_client.commands,
+            [
+                {"name": "PROBE", "args": ["SET", "probe:live:0", "0"]},
+                {"name": "PROBE", "args": ["SET", "probe:live:1", "1"]},
+                {"name": "PROBE", "args": ["SET", "probe:live:2", "2"]},
+            ],
+        )
+        self.assertIn("OK", output)

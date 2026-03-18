@@ -188,6 +188,81 @@ class CommandFlowTest(unittest.TestCase):
         self.assertIn("recovery_policy:best-effort", info)
         self.assertIn("config.fsync_policy:everysec", info)
 
+    def test_inspect_storage_reports_rehash_state_and_items(self) -> None:
+        manager = self.build_manager()
+        for index in range(4):
+            manager.execute({"name": "SET", "args": [f"key:{index}", f"value:{index}"]})
+
+        payload = manager.execute({"name": "INSPECT", "args": ["STORAGE", "FULL"]})
+
+        self.assertIn("# Storage", payload)
+        self.assertIn("is_rehashing:True", payload)
+        self.assertIn("items.key:3:value:3", payload)
+
+    def test_inspect_storage_reset_clears_recent_diagnostics(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["alpha", "1"]})
+
+        self.assertEqual(manager.execute({"name": "INSPECT", "args": ["STORAGE", "RESET"]}), "OK")
+        payload = manager.execute({"name": "INSPECT", "args": ["STORAGE"]})
+
+        self.assertIn("# Storage", payload)
+        self.assertIn("[table size:", payload)
+        self.assertIn("[resizing:", payload)
+
+    def test_inspect_storage_run_generates_synthetic_write_summary(self) -> None:
+        manager = self.build_manager()
+
+        payload = manager.execute({"name": "INSPECT", "args": ["STORAGE", "RUN", "5"]})
+
+        self.assertIn("# Storage Insert Run", payload)
+        self.assertIn("[request:", payload)
+        self.assertIn("[table size:", payload)
+        self.assertIn("[resizing:", payload)
+        self.assertNotIn("recent_operations.", payload)
+
+    def test_inspect_storage_update_runs_against_existing_probe_keys(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "INSPECT", "args": ["STORAGE", "RUN", "5"]})
+
+        payload = manager.execute({"name": "INSPECT", "args": ["STORAGE", "UPDATE", "5"]})
+
+        self.assertIn("# Storage Update Run", payload)
+        self.assertIn("[request:", payload)
+        self.assertIn("[table size:", payload)
+        self.assertIn("[resizing:", payload)
+
+    def test_benchmark_redis_reports_latency_summary(self) -> None:
+        manager = self.build_manager()
+
+        payload = manager.execute({"name": "BENCHMARK", "args": ["REDIS", "8", "KEEP"]})
+
+        self.assertIn("# Benchmark", payload)
+        self.assertIn("target:redis", payload)
+        self.assertIn("storage.latency.max_us:", payload)
+        self.assertIn("storage.is_rehashing:", payload)
+
+    def test_probe_set_reports_request_latency_and_resize_state(self) -> None:
+        manager = self.build_manager()
+
+        payload = manager.execute({"name": "PROBE", "args": ["SET", "probe:key", "1"]})
+
+        self.assertIn("[request:", payload)
+        self.assertIn("[table size:", payload)
+        self.assertIn("[resizing:", payload)
+        self.assertIn("size=", payload)
+
+    def test_probe_update_reports_request_latency_for_existing_key(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["probe:key", "1"]})
+
+        payload = manager.execute({"name": "PROBE", "args": ["UPDATE", "probe:key", "2"]})
+
+        self.assertIn("[request:", payload)
+        self.assertIn("[table size:", payload)
+        self.assertIn("[resizing:", payload)
+        self.assertEqual(manager.execute({"name": "GET", "args": ["probe:key"]}), "2")
+
     def test_save_and_flushdb(self) -> None:
         manager = self.build_manager()
         manager.execute({"name": "SET", "args": ["persist:key", "value"]})
