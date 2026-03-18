@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mini_redis.commands.handlers.bgrewriteaof import BGRewriteAOFHandler
+from mini_redis.commands.handlers.bgsave import BGSaveHandler
+from mini_redis.commands.handlers.config import ConfigHandler
 from mini_redis.commands.handlers.delete import DeleteHandler
 from mini_redis.commands.handlers.exists import ExistsHandler
 from mini_redis.commands.handlers.expire import ExpireHandler
@@ -22,7 +25,7 @@ from mini_redis.commands.handlers.save import SaveHandler
 from mini_redis.commands.handlers.set import SetHandler
 from mini_redis.commands.handlers.ttl import TTLHandler
 from mini_redis.commands.manager import CommandManager
-from mini_redis.config import APPEND_ONLY_FILE, PERSISTENCE_META_FILE, SNAPSHOT_FILE
+from mini_redis.config import APPEND_ONLY_FILE, DEFAULT_RECOVERY_POLICY, PERSISTENCE_META_FILE, SNAPSHOT_FILE
 from mini_redis.engine.redis import Redis
 from mini_redis.persistence.aof import AOFWriter
 from mini_redis.persistence.invalidation import InvalidationManager
@@ -38,6 +41,7 @@ def build_command_manager(
     appendonly_path: Path | None = None,
     snapshot_path: Path | None = None,
     metadata_path: Path | None = None,
+    recovery_policy: str | None = None,
 ) -> CommandManager:
     storage = StorageManager()
     ttl = TTLManager()
@@ -45,6 +49,7 @@ def build_command_manager(
         aof_writer=AOFWriter(appendonly_path or APPEND_ONLY_FILE),
         snapshot_store=RDBSnapshotStore(snapshot_path or SNAPSHOT_FILE),
         metadata_store=PersistenceMetadataStore(metadata_path or PERSISTENCE_META_FILE),
+        recovery_policy=recovery_policy or DEFAULT_RECOVERY_POLICY,
     )
     invalidation = InvalidationManager()
     mongo = MongoAdapter(enabled=False)
@@ -55,10 +60,14 @@ def build_command_manager(
         invalidation=invalidation,
         mongo=mongo,
     )
+    persistence.register_background_hooks(redis.save, redis.rewrite_aof)
     recovery_report = persistence.restore(redis)
 
     handlers = {
         "PING": PingHandler(redis),
+        "BGSAVE": BGSaveHandler(redis),
+        "BGREWRITEAOF": BGRewriteAOFHandler(redis),
+        "CONFIG": ConfigHandler(redis),
         "SET": SetHandler(redis),
         "GET": GetHandler(redis),
         "INFO": InfoHandler(redis),

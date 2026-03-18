@@ -83,6 +83,9 @@ class CommandFlowTest(unittest.TestCase):
         self.assertGreaterEqual(info["operation_log_length"], 1)
         self.assertIn("last_recovery", info)
         self.assertEqual(info["metadata"]["last_action"], "save")
+        self.assertEqual(info["metadata"]["schema_version"], 2)
+        self.assertEqual(info["recovery_policy"], "best-effort")
+        self.assertEqual(info["config"]["fsync_policy"], "everysec")
 
     def test_save_and_flushdb(self) -> None:
         manager = self.build_manager()
@@ -191,6 +194,118 @@ class CommandFlowTest(unittest.TestCase):
         result = manager.execute({"name": "REPAIRAOF", "args": []})
         self.assertFalse(result["repaired"])
         self.assertFalse(result["corruption_detected"])
+
+    def test_bgsave_completes_and_updates_metadata(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+        result = manager.execute({"name": "BGSAVE", "args": []})
+        self.assertTrue(result["queued"])
+
+        for _ in range(20):
+            info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+            if info["background_tasks"]["bgsave"]["status"] == "completed":
+                break
+            time.sleep(0.05)
+
+        info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+        self.assertEqual(info["background_tasks"]["bgsave"]["status"], "completed")
+        self.assertTrue(self.snapshot_path.exists())
+
+    def test_bgrewriteaof_completes(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+        result = manager.execute({"name": "BGREWRITEAOF", "args": []})
+        self.assertTrue(result["queued"])
+
+        for _ in range(20):
+            info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+            if info["background_tasks"]["bgrewriteaof"]["status"] == "completed":
+                break
+            time.sleep(0.05)
+
+        info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+        self.assertEqual(info["background_tasks"]["bgrewriteaof"]["status"], "completed")
+        self.assertTrue(self.appendonly_path.exists())
+
+    def test_config_get_and_set_updates_runtime_persistence_settings(self) -> None:
+        manager = self.build_manager()
+        self.assertEqual(
+            manager.execute({"name": "CONFIG", "args": ["GET", "fsync_policy"]}),
+            {"fsync_policy": "everysec"},
+        )
+        self.assertEqual(
+            manager.execute({"name": "CONFIG", "args": ["SET", "fsync_policy", "always"]}),
+            "OK",
+        )
+        self.assertEqual(
+            manager.execute({"name": "CONFIG", "args": ["SET", "autorewrite_min_operations", "5"]}),
+            "OK",
+        )
+        config = manager.execute({"name": "CONFIG", "args": ["GET", "*"]})
+        self.assertEqual(config["fsync_policy"], "always")
+        self.assertEqual(config["autorewrite_min_operations"], 5)
+
+    def test_autorewrite_threshold_schedules_background_task(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "CONFIG", "args": ["SET", "autorewrite_min_operations", "1"]})
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+
+        for _ in range(20):
+            info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+            task = info["background_tasks"].get("bgrewriteaof")
+            if task and task["status"] == "completed":
+                break
+            time.sleep(0.05)
+
+        info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+        self.assertEqual(info["background_tasks"]["bgrewriteaof"]["status"], "completed")
+
+    def test_autosave_interval_schedules_background_save(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "CONFIG", "args": ["SET", "autosave_interval", "1"]})
+        time.sleep(1.1)
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+
+        for _ in range(20):
+            info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+            task = info["background_tasks"].get("bgsave")
+            if task and task["status"] == "completed":
+                break
+            time.sleep(0.05)
+
+        info = manager.execute({"name": "INFO", "args": ["PERSISTENCE"]})
+        self.assertEqual(info["background_tasks"]["bgsave"]["status"], "completed")
+
+    def test_aof_only_policy_ignores_snapshot(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["persist:key", "value"]})
+        manager.execute({"name": "SAVE", "args": []})
+        self.appendonly_path.unlink(missing_ok=True)
+
+        restored = build_command_manager(
+            appendonly_path=self.appendonly_path,
+            snapshot_path=self.snapshot_path,
+            metadata_path=self.metadata_path,
+            recovery_policy="aof-only",
+        )
+        self.assertFalse(restored.recovery_report.snapshot_loaded)
+        self.assertIsNone(restored.execute({"name": "GET", "args": ["persist:key"]}))
+
+    def test_strict_policy_fails_on_corrupted_aof(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["safe", "value"]})
+        self.appendonly_path.write_text(
+            self.appendonly_path.read_text(encoding="utf-8") + '{"bad": \n',
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ValueError):
+            build_command_manager(
+                appendonly_path=self.appendonly_path,
+                snapshot_path=self.snapshot_path,
+                metadata_path=self.metadata_path,
+                recovery_policy="strict",
+            )
 
 
 if __name__ == "__main__":

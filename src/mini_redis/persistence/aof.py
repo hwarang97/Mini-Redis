@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 
@@ -19,13 +21,22 @@ class AOFReadResult:
 class AOFWriter:
     """Write operation events to an append-only log."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, fsync_policy: str = "everysec") -> None:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._fsync_policy = fsync_policy
+        self._last_fsync_at = monotonic()
 
     def append(self, operation: str, args: list[object]) -> None:
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"op": operation, "args": args}) + "\n")
+            handle.flush()
+            if self._fsync_policy == "always":
+                os.fsync(handle.fileno())
+                self._last_fsync_at = monotonic()
+            elif self._fsync_policy == "everysec" and monotonic() - self._last_fsync_at >= 1:
+                os.fsync(handle.fileno())
+                self._last_fsync_at = monotonic()
 
     def read_entries(self) -> AOFReadResult:
         if not self._path.exists():
@@ -97,3 +108,14 @@ class AOFWriter:
             "ignored_entries": result.ignored_entries,
             "corrupted_line": result.corrupted_line,
         }
+
+    def set_fsync_policy(self, policy: str) -> None:
+        self._fsync_policy = policy
+
+    @property
+    def fsync_policy(self) -> str:
+        return self._fsync_policy
+
+    @property
+    def path(self) -> Path:
+        return self._path

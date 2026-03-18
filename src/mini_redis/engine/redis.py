@@ -106,6 +106,9 @@ class Redis:
         self._persistence.record_snapshot_save()
         return str(path)
 
+    def bgsave(self) -> dict[str, Any]:
+        return self._persistence.start_background_save(self.save)
+
     def load(self) -> str:
         loaded = self._persistence.load_snapshot(self)
         if not loaded:
@@ -120,6 +123,12 @@ class Redis:
             return payload
         return "ERR unsupported INFO section"
 
+    def config_get(self, key: str) -> dict[str, Any] | str:
+        return self._persistence.get_config(key)
+
+    def config_set(self, key: str, value: str) -> str:
+        return self._persistence.set_config(key, value)
+
     def rewrite_aof(self) -> str:
         entries: list[dict[str, Any]] = []
         ttl_remaining = self._ttl.export_remaining(self._storage)
@@ -129,6 +138,9 @@ class Redis:
             entries.append({"op": "SET", "args": args})
         path = self._persistence.rewrite_aof(entries)
         return str(path)
+
+    def bgrewriteaof(self) -> dict[str, Any]:
+        return self._persistence.start_background_rewrite(self.rewrite_aof)
 
     def repair_aof(self) -> dict[str, Any]:
         return self._persistence.repair_aof()

@@ -31,6 +31,10 @@ Example commands:
 
 ```text
 PING
+BGSAVE
+BGREWRITEAOF
+CONFIG GET *
+CONFIG SET fsync_policy always
 SET user:1 hello
 GET user:1
 INFO PERSISTENCE
@@ -48,3 +52,17 @@ FLUSHDB
 DELETE user:1
 QUIT
 ```
+
+Recovery policies:
+
+- `best-effort`: load snapshot when available and replay valid AOF entries while ignoring corrupted tail
+- `snapshot-first`: prefer snapshot plus valid AOF replay
+- `aof-only`: rebuild only from AOF and ignore snapshot contents
+- `strict`: fail startup when corrupted AOF content is detected
+
+Runtime config keys:
+
+- `recovery_policy`
+- `fsync_policy`
+- `autosave_interval`
+- `autorewrite_min_operations`
