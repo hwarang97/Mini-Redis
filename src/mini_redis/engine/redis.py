@@ -148,15 +148,21 @@ class Redis:
         if normalized == "PERSISTENCE":
             payload = self._persistence.info()
             payload["key_count"] = self.key_count()
-            return payload
+            return self._format_info_payload("Persistence", payload)
         if normalized == "MONGO":
             payload = self._mongo.info()
             payload["key_count"] = self.key_count()
             return payload
         return "ERR unsupported INFO section"
 
-    def config_get(self, key: str) -> dict[str, Any] | str:
-        return self._persistence.get_config(key)
+    def config_get(self, key: str) -> list[str] | str:
+        config = self._persistence.get_config(key)
+        if isinstance(config, str):
+            return config
+        result: list[str] = []
+        for config_key, config_value in config.items():
+            result.extend([config_key, str(config_value)])
+        return result
 
     def config_set(self, key: str, value: str) -> str:
         return self._persistence.set_config(key, value)
@@ -263,3 +269,18 @@ class Redis:
         if isinstance(raw_tags, list):
             return [str(tag) for tag in raw_tags]
         return [str(raw_tags)]
+
+    def _format_info_payload(self, title: str, payload: dict[str, Any]) -> str:
+        lines: list[str] = [f"# {title}"]
+
+        def append_lines(prefix: str, value: Any) -> None:
+            if isinstance(value, dict):
+                for nested_key, nested_value in value.items():
+                    next_prefix = f"{prefix}.{nested_key}" if prefix else str(nested_key)
+                    append_lines(next_prefix, nested_value)
+                return
+            lines.append(f"{prefix}:{value}")
+
+        for key, value in payload.items():
+            append_lines(str(key), value)
+        return "\r\n".join(lines)

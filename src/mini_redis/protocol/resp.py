@@ -100,6 +100,9 @@ class RespCodec:
             # 현재 프로젝트 규약상 "ERR "로 시작하는 문자열은 RESP Error(-ERR ...)로 내려보낸다.
             if value.startswith("ERR "):
                 return f"-{value}\r\n".encode(ENCODING)
+            # Redis에서 PONG/OK 같은 상태 응답은 bulk string이 아니라 simple string으로 보내는 편이 표준적이다.
+            if value in {"OK", "PONG", "BYE"}:
+                return f"+{value}\r\n".encode(ENCODING)
             return self._encode_bulk_string(value)
         if isinstance(value, list):
             # list 응답은 LRANGE 같은 멀티 벌크 응답을 표현할 수 있으므로 재귀적으로 배열 인코딩한다.
