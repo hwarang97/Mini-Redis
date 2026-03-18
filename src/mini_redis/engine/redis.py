@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mini_redis.invalidation.manager import InvalidationManager
 from mini_redis.persistence.manager import PersistenceManager
 from mini_redis.storage.manager import StorageManager
 from mini_redis.storage.mongo_manager import MongoManager
@@ -18,29 +19,44 @@ class Redis:
         storage: StorageManager,
         ttl: TTLManager,
         persistence: PersistenceManager,
+        invalidation: InvalidationManager,
         mongo: MongoManager,
     ) -> None:
         self._storage = storage
         self._ttl = ttl
         self._persistence = persistence
+        self._invalidation = invalidation
         self._mongo = mongo
 
     def ping(self) -> str:
         return "PONG"
 
     def get(self, key: str) -> str | None:
-        self._ttl.purge_if_expired(key, self._storage)
+        self._purge_if_expired(key)
         return self._storage.get(key)
 
-    def set(self, key: str, value: str, ttl_seconds: int | None = None) -> str:
+    def set(
+        self,
+        key: str,
+        value: str,
+        ttl_seconds: int | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
         self._storage.set(key, value)
         self._ttl.set_expiration(key, ttl_seconds)
-        self._persistence.append("SET", key, value, ttl_seconds)
+        if tags is not None:
+            # Keep tag invalidation behavior from the other branch while merging Mongo support.
+            # Without this, SET ... TAGS would silently stop participating in INVALIDATE.
+            self._invalidation.set_tags(key, tags)
+        # Persist tags together with the value so snapshot/AOF replay keeps invalidation semantics.
+        self._persistence.append("SET", key, value, ttl_seconds, tags)
         self._mongo.sync_value(key, value)
         return "OK"
 
     def delete(self, key: str) -> int:
         self._ttl.clear_expiration(key)
+        # Clear the secondary invalidation index before deleting the value so tag lookups stay in sync.
+        self._invalidation.clear_key(key)
         deleted = 1 if self._storage.delete(key) else 0
         self._persistence.append("DELETE", key)
         if deleted:
@@ -48,11 +64,11 @@ class Redis:
         return deleted
 
     def exists(self, key: str) -> int:
-        self._ttl.purge_if_expired(key, self._storage)
+        self._purge_if_expired(key)
         return 1 if self._storage.exists(key) else 0
 
     def expire(self, key: str, ttl_seconds: int) -> int:
-        self._ttl.purge_if_expired(key, self._storage)
+        self._purge_if_expired(key)
         if not self._storage.exists(key):
             return 0
         self._ttl.set_expiration(key, ttl_seconds)
@@ -60,10 +76,11 @@ class Redis:
         return 1
 
     def ttl(self, key: str) -> int:
+        self._purge_if_expired(key)
         return self._ttl.ttl(key, self._storage)
 
     def keys(self) -> list[str]:
-        self._ttl.purge_expired_keys(self._storage)
+        self._purge_expired_keys()
         return self._storage.keys()
 
     def mget(self, keys: list[str]) -> list[str | None]:
@@ -87,16 +104,29 @@ class Redis:
     def flushdb(self) -> int:
         removed = self._storage.clear()
         self._ttl.clear_all()
+        # FLUSHDB must wipe secondary indexes too or later INVALIDATE calls can see stale keys.
+        self._invalidation.clear_all()
         self._persistence.append("FLUSHDB")
         if removed:
             self._mongo.clear()
         return removed
 
+    def invalidate(self, tag: str) -> int:
+        removed = 0
+        for key in self._invalidation.invalidate(tag):
+            self._ttl.clear_expiration(key)
+            if self._storage.delete(key):
+                removed += 1
+        # Keep INVALIDATE in AOF so replay does not resurrect cache entries that were already evicted.
+        self._persistence.append("INVALIDATE", tag)
+        return removed
+
     def save(self) -> str:
-        # Snapshot payloads carry the AOF offset so restore can replay only newer entries.
         snapshot = {
             "storage": self._storage.items(),
             "ttl": self._ttl.export(),
+            # Snapshot must include invalidation state so INVALIDATE keeps working after restore.
+            "invalidation": self._invalidation.export(),
             "operation_log": [list(entry) for entry in self._persistence.operation_log],
             "aof_offset": len(self._persistence.operation_log),
         }
@@ -133,11 +163,12 @@ class Redis:
 
     def rewrite_aof(self) -> str:
         entries: list[dict[str, Any]] = []
+        # Expire first so compaction only captures live data and live tag relationships.
+        self._purge_expired_keys()
         ttl_remaining = self._ttl.export_remaining(self._storage)
-        # Rebuild AOF from live state instead of replaying the full historical log.
         for key, value in self._storage.items().items():
             ttl_seconds = ttl_remaining.get(key)
-            args: list[Any] = [key, value, ttl_seconds]
+            args: list[Any] = [key, value, ttl_seconds, self._invalidation.tags_for_key(key)]
             entries.append({"op": "SET", "args": args})
         path = self._persistence.rewrite_aof(entries)
         return str(path)
@@ -152,22 +183,36 @@ class Redis:
         self._storage.load_items(
             {str(key): str(value) for key, value in snapshot.get("storage", {}).items()}
         )
-        self._ttl.load_expirations(
+        # Restore invalidation metadata alongside values so cache-tag behavior survives restart.
+        self._invalidation.load_tag_map(
+            {
+                str(tag): list(keys)
+                for tag, keys in snapshot.get("invalidation", {}).items()
+                if isinstance(keys, list)
+            }
+        )
+        expired_keys = self._ttl.load_expirations(
             {str(key): str(value) for key, value in snapshot.get("ttl", {}).items()},
             self._storage,
         )
+        for key in expired_keys:
+            self._invalidation.clear_key(key)
 
     def replay_operation(self, operation: str, args: list[Any]) -> None:
-        # Replay bypasses normal command handlers so restore can rebuild state quickly.
         name = operation.upper()
         if name == "SET" and len(args) >= 2:
             ttl_seconds = None if len(args) < 3 or args[2] is None else int(args[2])
-            self._storage.set(str(args[0]), str(args[1]))
-            self._ttl.set_expiration(str(args[0]), ttl_seconds)
+            tags = self._coerce_tags(args[3]) if len(args) >= 4 else None
+            key = str(args[0])
+            self._storage.set(key, str(args[1]))
+            self._ttl.set_expiration(key, ttl_seconds)
+            if tags is not None:
+                self._invalidation.set_tags(key, tags)
             return
         if name == "DELETE" and args:
             key = str(args[0])
             self._ttl.clear_expiration(key)
+            self._invalidation.clear_key(key)
             self._storage.delete(key)
             return
         if name == "EXPIRE" and len(args) == 2:
@@ -180,18 +225,41 @@ class Redis:
             next_value = 1 if current is None else int(current) + 1
             self._storage.set(str(args[0]), str(next_value))
             return
+        if name == "INVALIDATE" and args:
+            for key in self._invalidation.invalidate(str(args[0])):
+                self._ttl.clear_expiration(key)
+                self._storage.delete(key)
+            return
         if name == "FLUSHDB":
             self._storage.clear()
             self._ttl.clear_all()
+            self._invalidation.clear_all()
             return
 
     def reset_state(self) -> None:
         self._storage.clear()
         self._ttl.clear_all()
+        self._invalidation.clear_all()
 
     def key_count(self) -> int:
-        self._ttl.purge_expired_keys(self._storage)
+        self._purge_expired_keys()
         return len(self._storage.items())
 
     def quit(self) -> str:
         return "BYE"
+
+    def _purge_if_expired(self, key: str) -> None:
+        # TTLManager only knows about expirations and storage; Redis cleans sibling indexes afterward.
+        if self._ttl.purge_if_expired(key, self._storage):
+            self._invalidation.clear_key(key)
+
+    def _purge_expired_keys(self) -> None:
+        for key in self._ttl.purge_expired_keys(self._storage):
+            self._invalidation.clear_key(key)
+
+    def _coerce_tags(self, raw_tags: Any) -> list[str] | None:
+        if raw_tags is None:
+            return None
+        if isinstance(raw_tags, list):
+            return [str(tag) for tag in raw_tags]
+        return [str(raw_tags)]

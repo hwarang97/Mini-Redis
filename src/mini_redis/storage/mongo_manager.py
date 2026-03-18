@@ -20,6 +20,10 @@ class MongoManager:
     def sync_value(self, key: str, value: str) -> None:
         self._adapter.upsert(key, value)
 
+    def maybe_sync(self, key: str, value: str) -> None:
+        # Compatibility shim for code written before MongoManager replaced direct adapter usage.
+        self.sync_value(key, value)
+
     def delete_key(self, key: str) -> None:
         self._adapter.delete(key)
 

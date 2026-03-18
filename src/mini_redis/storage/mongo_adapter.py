@@ -54,6 +54,10 @@ class MongoAdapter:
         self._require_collection().delete_many({})
         self.operations.append({"action": "clear"})
 
+    def maybe_sync(self, key: str, value: str) -> None:
+        # Compatibility shim for older engine code that still calls the original adapter hook name.
+        self.upsert(key, value)
+
     def info(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
@@ -62,6 +66,8 @@ class MongoAdapter:
             "database": self.database,
             "collection": self.collection,
             "operation_count": len(self.operations),
+            # Keep the old field name too so earlier tests/callers do not break on rename.
+            "queued_operations": len(self.operations),
             "last_operation": self.operations[-1] if self.operations else None,
         }
 

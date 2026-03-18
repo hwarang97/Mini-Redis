@@ -70,6 +70,31 @@ class CommandFlowTest(unittest.TestCase):
             ["2", "10", None],
         )
 
+    def test_invalidate_removes_all_keys_for_a_tag(self) -> None:
+        manager = self.build_manager()
+
+        manager.execute({"name": "SET", "args": ["user:1:profile", "profile", "TAGS", "user:1"]})
+        manager.execute(
+            {"name": "SET", "args": ["user:1:posts", "posts", "EX", "60", "TAGS", "user:1"]}
+        )
+        manager.execute({"name": "SET", "args": ["user:1:followers", "followers", "TAGS", "user:1"]})
+        manager.execute({"name": "SET", "args": ["user:2:profile", "profile", "TAGS", "user:2"]})
+
+        self.assertEqual(manager.execute({"name": "INVALIDATE", "args": ["user:1"]}), 3)
+        self.assertIsNone(manager.execute({"name": "GET", "args": ["user:1:profile"]}))
+        self.assertIsNone(manager.execute({"name": "GET", "args": ["user:1:posts"]}))
+        self.assertIsNone(manager.execute({"name": "GET", "args": ["user:1:followers"]}))
+        self.assertEqual(manager.execute({"name": "GET", "args": ["user:2:profile"]}), "profile")
+
+    def test_expired_tagged_key_is_removed_from_invalidation_index(self) -> None:
+        manager = self.build_manager()
+
+        manager.execute({"name": "SET", "args": ["session:1", "ok", "EX", "1", "TAGS", "user:1"]})
+        time.sleep(1.1)
+
+        self.assertIsNone(manager.execute({"name": "GET", "args": ["session:1"]}))
+        self.assertEqual(manager.execute({"name": "INVALIDATE", "args": ["user:1"]}), 0)
+
     def test_info_persistence_reports_runtime_state(self) -> None:
         manager = self.build_manager()
         manager.execute({"name": "SET", "args": ["alpha", "1"]})
@@ -136,6 +161,25 @@ class CommandFlowTest(unittest.TestCase):
         restored = self.build_manager()
         ttl = restored.execute({"name": "TTL", "args": ["session"]})
         self.assertIn(ttl, {0, 1})
+
+    def test_restore_keeps_tag_map_from_snapshot_and_aof_tail(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["user:1:profile", "profile", "TAGS", "user:1"]})
+        manager.execute({"name": "SAVE", "args": []})
+        manager.execute({"name": "SET", "args": ["user:1:posts", "posts", "TAGS", "user:1"]})
+
+        restored = self.build_manager()
+        self.assertEqual(restored.execute({"name": "INVALIDATE", "args": ["user:1"]}), 2)
+        self.assertIsNone(restored.execute({"name": "GET", "args": ["user:1:profile"]}))
+        self.assertIsNone(restored.execute({"name": "GET", "args": ["user:1:posts"]}))
+
+    def test_restore_replays_invalidate_from_aof(self) -> None:
+        manager = self.build_manager()
+        manager.execute({"name": "SET", "args": ["user:1:profile", "profile", "TAGS", "user:1"]})
+        manager.execute({"name": "INVALIDATE", "args": ["user:1"]})
+
+        restored = self.build_manager()
+        self.assertIsNone(restored.execute({"name": "GET", "args": ["user:1:profile"]}))
 
     def test_rewrite_aof_compacts_current_state(self) -> None:
         manager = self.build_manager()
@@ -306,6 +350,17 @@ class CommandFlowTest(unittest.TestCase):
                 metadata_path=self.metadata_path,
                 recovery_policy="strict",
             )
+
+    def test_keys_sweeps_expired_entries_before_listing(self) -> None:
+        # This makes sure a full key listing purges expired entries before returning.
+        manager = self.build_manager()
+
+        manager.execute({"name": "SET", "args": ["live", "1"]})
+        manager.execute({"name": "SET", "args": ["soon:gone", "1", "EX", "1"]})
+
+        time.sleep(1.1)
+
+        self.assertEqual(manager.execute({"name": "KEYS", "args": []}), ["live"])
 
 
 if __name__ == "__main__":

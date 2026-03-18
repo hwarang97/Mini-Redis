@@ -104,7 +104,7 @@ class MongoIntegrationTest(unittest.TestCase):
             client_factory=FakeMongoClient,
         )
 
-        adapter.upsert("user:1", "hello")
+        adapter.maybe_sync("user:1", "hello")
         adapter.delete("user:1")
         adapter.upsert("user:2", "world")
 
@@ -117,6 +117,7 @@ class MongoIntegrationTest(unittest.TestCase):
         self.assertEqual(info["database"], "mini_redis")
         self.assertEqual(info["collection"], "kv_store")
         self.assertEqual(info["operation_count"], 3)
+        self.assertEqual(info["queued_operations"], 3)
         self.assertEqual(collection.documents, {"user:2": {"_id": "user:2", "value": "world"}})
         self.assertEqual(client.admin.commands, ["ping"])
 
@@ -134,7 +135,7 @@ class MongoIntegrationTest(unittest.TestCase):
         adapter = FakeMongoAdapter()
         manager = MongoManager(adapter)
 
-        manager.sync_value("user:1", "hello")
+        manager.maybe_sync("user:1", "hello")
         manager.delete_key("user:1")
         manager.clear()
 
