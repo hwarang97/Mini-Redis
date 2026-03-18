@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from time import perf_counter_ns
 from typing import Any
 
 from mini_redis.invalidation.manager import InvalidationManager
 from mini_redis.persistence.manager import PersistenceManager
+from mini_redis.storage.benchmark import BenchmarkResult
+from mini_redis.storage.benchmark import StorageBenchmarkSuite
 from mini_redis.storage.manager import StorageManager
 from mini_redis.storage.mongo_manager import MongoManager
 from mini_redis.storage.ttl import TTLManager
@@ -27,6 +30,7 @@ class Redis:
         self._persistence = persistence
         self._invalidation = invalidation
         self._mongo = mongo
+        self._benchmark_suite = StorageBenchmarkSuite()
 
     def ping(self) -> str:
         return "PONG"
@@ -148,6 +152,164 @@ class Redis:
             payload["key_count"] = self.key_count()
             return payload
         return "ERR unsupported INFO section"
+
+    def inspect_storage(self, include_table: bool = False) -> str:
+        payload = self._storage.inspect(include_table=include_table)
+        payload["key_count"] = self.key_count()
+        if not include_table:
+            latest_storage_op = self._storage.latest_operation()
+            last_request = (
+                "n/a"
+                if latest_storage_op is None
+                else f"{latest_storage_op['elapsed_us'] / 1_000:.3f} ms"
+            )
+            return (
+                "# Storage\r\n"
+                f"[table size: {payload['active_capacity']}] "
+                f"[resizing: {payload['is_rehashing']}] "
+                f"[keys: {payload['key_count']}] "
+                f"[rehash table size: {payload['rehash_capacity']}] "
+                f"[progress: {payload['rehash_progress']}] "
+                f"[last request: {last_request}]"
+            )
+        return self._format_info_payload("Storage", payload)
+
+    def reset_storage_diagnostics(self) -> str:
+        self._storage.reset_diagnostics()
+        return "OK"
+
+    def run_storage_probe(
+        self,
+        operations: int,
+        *,
+        mode: str = "insert",
+    ) -> str:
+        if operations <= 0:
+            return "ERR operations must be a positive integer"
+
+        self._storage.reset_diagnostics()
+        prefix = "inspect:run:"
+        normalized_mode = mode.lower()
+        if normalized_mode not in {"insert", "update"}:
+            return "ERR unsupported storage probe mode"
+
+        lines = [f"# Storage {normalized_mode.title()} Run"]
+        for index in range(operations):
+            key = f"{prefix}{index}"
+            value = str(index) if normalized_mode == "insert" else f"updated:{index}"
+            if normalized_mode == "insert":
+                lines.append(self.probe_set(key, value))
+                continue
+            lines.append(self.probe_update(key, value))
+        return "\r\n".join(lines)
+
+    def benchmark(
+        self,
+        target: str,
+        operations: int,
+        *,
+        keep_data: bool = False,
+    ) -> str:
+        normalized = target.upper()
+        if operations <= 0:
+            return "ERR operations must be a positive integer"
+
+        if normalized == "REDIS":
+            result = self._benchmark_suite.benchmark_redis_set(
+                self._storage,
+                operations,
+                key_prefix="bench:redis:",
+                keep_data=keep_data,
+            )
+            return self._format_benchmark_result(result)
+
+        if normalized == "MONGO":
+            if not self._mongo.enabled:
+                return "ERR MongoDB benchmark requires mongo integration to be enabled"
+            result = self._benchmark_suite.benchmark_mongo_write(
+                self._mongo,
+                operations,
+                key_prefix="bench:mongo:",
+                keep_data=keep_data,
+            )
+            return self._format_benchmark_result(result)
+
+        if normalized == "HYBRID":
+            if not self._mongo.enabled:
+                return "ERR hybrid benchmark requires mongo integration to be enabled"
+            result = self._benchmark_suite.benchmark_hybrid_write(
+                self._storage,
+                self._mongo,
+                operations,
+                key_prefix="bench:hybrid:",
+                keep_data=keep_data,
+            )
+            return self._format_benchmark_result(result)
+
+        return "ERR unsupported benchmark target"
+
+    def probe_set(
+        self,
+        key: str,
+        value: str,
+        ttl_seconds: int | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        started_at_ns = perf_counter_ns()
+        result = self.set(key, value, ttl_seconds=ttl_seconds, tags=tags)
+        elapsed_us = (perf_counter_ns() - started_at_ns) / 1_000
+        if isinstance(result, str) and result.startswith("ERR "):
+            return result
+
+        snapshot = self._storage.inspect(include_table=False)
+        latest_storage_op = self._storage.latest_operation()
+        return (
+            f"[request: {elapsed_us / 1_000:.3f} ms ({elapsed_us:.3f} us)] "
+            f"[table size: {snapshot['active_capacity']}] "
+            f"[resizing: {snapshot['is_rehashing']}] "
+            f"size={snapshot['size']} "
+            f"rehash_capacity={snapshot['rehash_capacity']} "
+            f"progress={snapshot['rehash_progress']}"
+            + (
+                ""
+                if latest_storage_op is None
+                else (
+                    f" storage_{latest_storage_op['operation']}: "
+                    f"{latest_storage_op['elapsed_us'] / 1_000:.3f} ms"
+                    f" ({latest_storage_op['elapsed_us']:.3f} us)"
+                )
+            )
+        )
+
+    def probe_update(self, key: str, value: str) -> str:
+        if self._storage.get(key) is None:
+            return f"ERR key '{key}' does not exist for update probe"
+
+        started_at_ns = perf_counter_ns()
+        result = self.set(key, value)
+        elapsed_us = (perf_counter_ns() - started_at_ns) / 1_000
+        if isinstance(result, str) and result.startswith("ERR "):
+            return result
+
+        snapshot = self._storage.inspect(include_table=False)
+        latest_storage_op = self._storage.latest_operation()
+        return (
+            f"[request: {elapsed_us / 1_000:.3f} ms ({elapsed_us:.3f} us)] "
+            f"[table size: {snapshot['active_capacity']}] "
+            f"[resizing: {snapshot['is_rehashing']}] "
+            f"size={snapshot['size']} "
+            f"rehash_capacity={snapshot['rehash_capacity']} "
+            f"progress={snapshot['rehash_progress']}"
+            + (
+                ""
+                if latest_storage_op is None
+                else (
+                    f" storage_{latest_storage_op['operation']}: "
+                    f"{latest_storage_op['elapsed_us'] / 1_000:.3f} ms"
+                    f" ({latest_storage_op['elapsed_us']:.3f} us)"
+                )
+            )
+        )
 
     def config_get(self, key: str) -> list[str] | str:
         config = self._persistence.get_config(key)
@@ -273,8 +435,26 @@ class Redis:
                     next_prefix = f"{prefix}.{nested_key}" if prefix else str(nested_key)
                     append_lines(next_prefix, nested_value)
                 return
+            if isinstance(value, list):
+                for index, nested_value in enumerate(value):
+                    next_prefix = f"{prefix}.{index}" if prefix else str(index)
+                    append_lines(next_prefix, nested_value)
+                if not value:
+                    lines.append(f"{prefix}:[]")
+                return
             lines.append(f"{prefix}:{value}")
 
         for key, value in payload.items():
             append_lines(str(key), value)
         return "\r\n".join(lines)
+
+    def _format_benchmark_result(self, result: BenchmarkResult) -> str:
+        payload: dict[str, Any] = {
+            "target": result.target,
+            "operation": result.operation,
+            "operations": result.operations,
+            "elapsed_seconds": round(result.elapsed_seconds, 6),
+            "ops_per_second": round(result.ops_per_second, 3),
+        }
+        payload.update(result.details)
+        return self._format_info_payload("Benchmark", payload)

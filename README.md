@@ -32,6 +32,18 @@ Example commands:
 
 ```text
 PING
+INSPECT STORAGE
+INSPECT STORAGE FULL
+INSPECT STORAGE RESET
+INSPECT STORAGE RUN 20
+INSPECT STORAGE RUN 20 0.05
+PROBE SET demo:key 1
+BENCHMARK REDIS 1000 KEEP
+BENCHMARK MONGO 1000
+BENCHMARK HYBRID 1000
+WATCH 0.2 20 INSPECT STORAGE
+WATCH 0.5 10 INSPECT STORAGE FULL
+LIVESET 20 0.1
 BGSAVE
 BGREWRITEAOF
 CONFIG GET *
@@ -57,6 +69,68 @@ FLUSHDB
 DELETE user:1
 QUIT
 ```
+
+## Rehash inspection
+
+Use `PROBE SET` and `LIVESET` when you want to generate writes in real time and observe whether resizing introduces per-request latency spikes.
+
+- `PROBE SET <key> <value>`
+  - executes one write and immediately returns a one-line summary:
+  - `[request 처리 시간] [현재 테이블 크기] [리사이징 여부]`
+- `LIVESET <count> [interval_seconds] [key_prefix]`
+  - generates repeated `PROBE SET` requests from the CLI so you can observe write bursts live
+
+Example:
+
+```text
+LIVESET 30 0.1
+```
+
+This will print one line per generated request, for example:
+
+```text
+[request 18.200us] [table 8] [rehashing False] size=3 rehash_capacity=0 progress=1.0 storage_set=7.5us
+[request 26.100us] [table 8] [rehashing True] size=4 rehash_capacity=16 progress=0.0 storage_set=14.2us
+```
+
+If you want to inspect the full bucket layout after the burst, use `INSPECT STORAGE` or `INSPECT STORAGE FULL`.
+
+`INSPECT STORAGE RUN <count> [interval_seconds]` is useful when you want the server itself to generate synthetic writes and immediately show what happened on each request. This is helpful for observing resize and latency behavior without manually typing many `SET` commands.
+
+`INSPECT STORAGE RESET` clears only the in-memory diagnostic counters and recent operation samples. It does not delete stored key/value data.
+
+- `INSPECT STORAGE`
+  - shows size, active capacity, rehash capacity, rehash progress, and recent latency samples
+- `INSPECT STORAGE FULL`
+  - also shows the live key/value view plus the active and rehash bucket layouts
+- `WATCH 0.2 20 INSPECT STORAGE`
+  - repeats the same command every 0.2 seconds for 20 iterations so you can observe rehash progress live from the CLI
+
+Suggested quick demo:
+
+```text
+INSPECT STORAGE RESET
+INSPECT STORAGE RUN 40 0.05
+INSPECT STORAGE FULL
+LIVESET 40 0.05
+INSPECT STORAGE
+INSPECT STORAGE FULL
+```
+
+For larger batch experiments, `BENCHMARK REDIS <count> KEEP` keeps the inserted keys in memory, which makes it easier to inspect bucket growth and rehash progress after the write burst.
+
+## Benchmark modes
+
+Use `BENCHMARK` to compare write cost across backends:
+
+- `BENCHMARK REDIS <count>`
+  - measures in-memory Redis writes only
+- `BENCHMARK MONGO <count>`
+  - measures MongoDB writes only
+- `BENCHMARK HYBRID <count>`
+  - measures writing the same keys to Redis and MongoDB together
+
+All benchmark responses include elapsed time, throughput, and backend-specific details. Redis and hybrid runs also include storage latency and rehash diagnostics.
 
 Recovery policies:
 

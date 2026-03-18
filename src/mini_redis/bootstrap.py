@@ -7,6 +7,7 @@ from typing import Any
 
 from mini_redis.commands.handlers.bgrewriteaof import BGRewriteAOFHandler
 from mini_redis.commands.handlers.bgsave import BGSaveHandler
+from mini_redis.commands.handlers.benchmark import BenchmarkHandler
 from mini_redis.commands.handlers.config import ConfigHandler
 from mini_redis.commands.handlers.delete import DeleteHandler
 from mini_redis.commands.handlers.exists import ExistsHandler
@@ -16,10 +17,12 @@ from mini_redis.commands.handlers.get import GetHandler
 from mini_redis.commands.handlers.info import InfoHandler
 from mini_redis.commands.handlers.incr import IncrHandler
 from mini_redis.commands.handlers.invalidate import InvalidateHandler
+from mini_redis.commands.handlers.inspect import InspectHandler
 from mini_redis.commands.handlers.keys import KeysHandler
 from mini_redis.commands.handlers.load import LoadHandler
 from mini_redis.commands.handlers.mget import MGetHandler
 from mini_redis.commands.handlers.ping import PingHandler
+from mini_redis.commands.handlers.probe import ProbeHandler
 from mini_redis.commands.handlers.quit import QuitHandler
 from mini_redis.commands.handlers.repairaof import RepairAOFHandler
 from mini_redis.commands.handlers.rewriteaof import RewriteAOFHandler
@@ -102,12 +105,15 @@ def build_command_manager(
 
     handlers = {
         "PING": PingHandler(redis),
+        "BENCHMARK": BenchmarkHandler(redis),
         "BGSAVE": BGSaveHandler(redis),
         "BGREWRITEAOF": BGRewriteAOFHandler(redis),
         "CONFIG": ConfigHandler(redis),
+        "PROBE": ProbeHandler(redis),
         "SET": SetHandler(redis),
         "GET": GetHandler(redis),
         "INFO": InfoHandler(redis),
+        "INSPECT": InspectHandler(redis),
         "MGET": MGetHandler(redis),
         # INVALIDATE도 다른 명령과 동일하게 CommandManager를 통해 진입시켜
         # TCP/RESP/Redis 경계를 우회하지 않게 한다.

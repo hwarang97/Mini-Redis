@@ -191,6 +191,21 @@ class MongoIntegrationTest(unittest.TestCase):
         self.assertEqual(mongo_result.operation, "write")
         self.assertEqual(mongo_result.operations, 5)
 
+    def test_benchmark_suite_measures_hybrid_storage_and_mongo_together(self) -> None:
+        from mini_redis.storage.manager import StorageManager
+
+        suite = StorageBenchmarkSuite()
+        storage = StorageManager()
+        mongo = MongoManager(FakeMongoAdapter())
+
+        result = suite.benchmark_hybrid_write(storage, mongo, 5, keep_data=True)
+
+        self.assertEqual(result.target, "hybrid")
+        self.assertEqual(result.operation, "write")
+        self.assertEqual(result.operations, 5)
+        self.assertTrue(result.details["storage"]["size"] >= 5)
+        self.assertEqual(result.details["mongo"]["operation_count"], 5)
+
     def test_build_manager_exposes_mongo_info_section(self) -> None:
         base = Path("data/test-mongo-info")
         base.mkdir(parents=True, exist_ok=True)
