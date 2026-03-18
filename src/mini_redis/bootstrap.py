@@ -9,10 +9,12 @@ from mini_redis.commands.handlers.bgrewriteaof import BGRewriteAOFHandler
 from mini_redis.commands.handlers.bgsave import BGSaveHandler
 from mini_redis.commands.handlers.config import ConfigHandler
 from mini_redis.commands.handlers.delete import DeleteHandler
+from mini_redis.commands.handlers.dumpall import DumpAllHandler
 from mini_redis.commands.handlers.exists import ExistsHandler
 from mini_redis.commands.handlers.expire import ExpireHandler
 from mini_redis.commands.handlers.flushdb import FlushDBHandler
 from mini_redis.commands.handlers.get import GetHandler
+from mini_redis.commands.handlers.help import HelpHandler
 from mini_redis.commands.handlers.info import InfoHandler
 from mini_redis.commands.handlers.incr import IncrHandler
 from mini_redis.commands.handlers.invalidate import InvalidateHandler
@@ -105,8 +107,10 @@ def build_command_manager(
         "BGSAVE": BGSaveHandler(redis),
         "BGREWRITEAOF": BGRewriteAOFHandler(redis),
         "CONFIG": ConfigHandler(redis),
+        "DUMPALL": DumpAllHandler(redis),
         "SET": SetHandler(redis),
         "GET": GetHandler(redis),
+        "HELP": HelpHandler(redis),
         "INFO": InfoHandler(redis),
         "MGET": MGetHandler(redis),
         # INVALIDATE도 다른 명령과 동일하게 CommandManager를 통해 진입시켜

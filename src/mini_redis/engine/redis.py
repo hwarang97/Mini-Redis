@@ -80,6 +80,22 @@ class Redis:
         self._purge_expired_keys()
         return self._storage.keys()
 
+    def dumpall(self) -> list[str]:
+        # 전체 데이터 조회 전에도 만료 key를 먼저 정리해서 발표/디버깅 화면에 stale entry가 보이지 않게 한다.
+        self._purge_expired_keys()
+        items = self._storage.items()
+        ttl_remaining = self._ttl.export_remaining(self._storage)
+        lines: list[str] = []
+        for key in sorted(items):
+            ttl_seconds = ttl_remaining.get(key)
+            ttl_display = "persistent" if ttl_seconds is None else f"{ttl_seconds}s"
+            tags = self._invalidation.tags_for_key(key)
+            tags_display = ",".join(tags) if tags else "-"
+            lines.append(
+                f"key={key} value={items[key]} ttl={ttl_display} tags={tags_display}"
+            )
+        return lines
+
     def mget(self, keys: list[str]) -> list[str | None]:
         return [self.get(key) for key in keys]
 
