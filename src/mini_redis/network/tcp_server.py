@@ -15,20 +15,20 @@ class _RequestHandler(socketserver.StreamRequestHandler):
     codec: RespCodec
 
     def handle(self) -> None:
-        try:
-            # self.rfile은 StreamRequestHandler가 제공하는 바이너리 입력 스트림이다.
-            # decode_command_stream(...)은 한 줄짜리 JSON이 아니라, 여러 줄에 걸친 RESP 프레임 전체를 끝까지 읽을 수 있다.
-            command = self.codec.decode_command_stream(self.rfile)
-        except ValueError:
-            # 잘못되었거나 중간에 끊긴 프레임은 transport 레벨에서 조용히 종료해 서버 루프를 보호한다.
-            return
-        # 실제 실행은 반드시 CommandManager를 통해서만 이루어져, TCP 서버가 비즈니스 로직을 직접 처리하지 않는다.
-        # 요청별 스레드는 여기까지는 병렬로 들어올 수 있지만, "명령을 어떤 경로로 실행할지"에 대한 공통 관문은
-        # manager.execute(...) 하나로 고정해 두었다. 그래서 이후 queue 기반 직렬화나 공통 후처리를 추가하더라도
-        # transport 코드를 거의 건드리지 않고 이 경계 안에서 확장할 수 있다.
-        response = self.manager.execute(command)
-        # encode_response(...)는 실행 결과를 RESP bytes로 바꿔 클라이언트에 다시 써 준다.
-        self.wfile.write(self.codec.encode_response(response))
+        while True:
+            try:
+                # Keep the TCP session open so clients can issue
+                # multiple commands over a single connection.
+                command = self.codec.decode_command_stream(self.rfile)
+            except (OSError, ValueError):
+                return
+
+            response = self.manager.execute(command)
+            self.wfile.write(self.codec.encode_response(response))
+            self.wfile.flush()
+
+            if command["name"] == "QUIT":
+                return
 
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):
