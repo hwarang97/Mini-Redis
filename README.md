@@ -46,7 +46,9 @@ INSPECT STORAGE UPDATE 20
 PROBE SET demo:key 1
 PROBE UPDATE inspect:run:0 updated:0
 BENCHMARK REDIS 1000 KEEP
+BENCHMARK REDIS GET 1000 KEEP
 BENCHMARK MONGO 1000
+BENCHMARK MONGO GET 1000
 BENCHMARK HYBRID 1000
 WATCH 0.2 20 INSPECT STORAGE
 WATCH 0.5 10 INSPECT STORAGE FULL
@@ -92,12 +94,16 @@ INSPECT STORAGE FULL
 
 ## Benchmark modes
 
-Use `BENCHMARK` to compare write cost across backends:
+Use `BENCHMARK` to compare read and write cost across backends:
 
 - `BENCHMARK REDIS <count>`
   - Measures in-memory Redis writes only.
+- `BENCHMARK REDIS GET <count>`
+  - Measures in-memory Redis reads against preloaded benchmark keys.
 - `BENCHMARK MONGO <count>`
   - Measures MongoDB writes only.
+- `BENCHMARK MONGO GET <count>`
+  - Measures MongoDB reads against preloaded benchmark keys.
 - `BENCHMARK HYBRID <count>`
   - Measures writing the same keys to Redis and MongoDB together.
 

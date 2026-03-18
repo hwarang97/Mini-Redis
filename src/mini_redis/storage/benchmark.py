@@ -47,6 +47,30 @@ class StorageBenchmarkSuite:
                 storage.delete(f"{key_prefix}{index}")
         return self._result("redis", "set", operations, elapsed, details)
 
+    def benchmark_redis_get(
+        self,
+        storage: StorageManager,
+        operations: int,
+        *,
+        key_prefix: str = "redis:bench:",
+        keep_data: bool = False,
+    ) -> BenchmarkResult:
+        for index in range(operations):
+            storage.set(f"{key_prefix}{index}", str(index))
+        storage.reset_diagnostics()
+        started_at = perf_counter()
+        for index in range(operations):
+            storage.get(f"{key_prefix}{index}")
+        elapsed = perf_counter() - started_at
+        details = {
+            "keep_data": keep_data,
+            "storage": storage.inspect(include_table=False),
+        }
+        if not keep_data:
+            for index in range(operations):
+                storage.delete(f"{key_prefix}{index}")
+        return self._result("redis", "get", operations, elapsed, details)
+
     def benchmark_mongo_write(
         self,
         mongo: MongoManager,
@@ -65,6 +89,31 @@ class StorageBenchmarkSuite:
         return self._result(
             "mongo",
             "write",
+            operations,
+            elapsed,
+            {"keep_data": keep_data, "mongo": mongo.info()},
+        )
+
+    def benchmark_mongo_get(
+        self,
+        mongo: MongoManager,
+        operations: int,
+        *,
+        key_prefix: str = "mongo:bench:",
+        keep_data: bool = False,
+    ) -> BenchmarkResult:
+        for index in range(operations):
+            mongo.write_value(f"{key_prefix}{index}", str(index))
+        started_at = perf_counter()
+        for index in range(operations):
+            mongo.read_value(f"{key_prefix}{index}")
+        elapsed = perf_counter() - started_at
+        if not keep_data:
+            for index in range(operations):
+                mongo.delete_key(f"{key_prefix}{index}")
+        return self._result(
+            "mongo",
+            "get",
             operations,
             elapsed,
             {"keep_data": keep_data, "mongo": mongo.info()},

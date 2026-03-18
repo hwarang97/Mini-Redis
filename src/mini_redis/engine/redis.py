@@ -230,35 +230,64 @@ class Redis:
         target: str,
         operations: int,
         *,
+        operation: str | None = None,
         keep_data: bool = False,
     ) -> str:
         normalized = target.upper()
+        normalized_operation = (
+            "WRITE" if operation is None and normalized in {"MONGO", "HYBRID"} else operation
+        )
+        if normalized_operation is None:
+            normalized_operation = "SET"
+        normalized_operation = normalized_operation.upper()
         if operations <= 0:
             return "ERR operations must be a positive integer"
 
         if normalized == "REDIS":
-            result = self._benchmark_suite.benchmark_redis_set(
-                self._storage,
-                operations,
-                key_prefix="bench:redis:",
-                keep_data=keep_data,
-            )
+            if normalized_operation == "SET":
+                result = self._benchmark_suite.benchmark_redis_set(
+                    self._storage,
+                    operations,
+                    key_prefix="bench:redis:",
+                    keep_data=keep_data,
+                )
+            elif normalized_operation == "GET":
+                result = self._benchmark_suite.benchmark_redis_get(
+                    self._storage,
+                    operations,
+                    key_prefix="bench:redis:",
+                    keep_data=keep_data,
+                )
+            else:
+                return "ERR unsupported benchmark operation"
             return self._format_benchmark_result(result)
 
         if normalized == "MONGO":
             if not self._mongo.enabled:
                 return "ERR MongoDB benchmark requires mongo integration to be enabled"
-            result = self._benchmark_suite.benchmark_mongo_write(
-                self._mongo,
-                operations,
-                key_prefix="bench:mongo:",
-                keep_data=keep_data,
-            )
+            if normalized_operation == "WRITE":
+                result = self._benchmark_suite.benchmark_mongo_write(
+                    self._mongo,
+                    operations,
+                    key_prefix="bench:mongo:",
+                    keep_data=keep_data,
+                )
+            elif normalized_operation == "GET":
+                result = self._benchmark_suite.benchmark_mongo_get(
+                    self._mongo,
+                    operations,
+                    key_prefix="bench:mongo:",
+                    keep_data=keep_data,
+                )
+            else:
+                return "ERR unsupported benchmark operation"
             return self._format_benchmark_result(result)
 
         if normalized == "HYBRID":
             if not self._mongo.enabled:
                 return "ERR hybrid benchmark requires mongo integration to be enabled"
+            if normalized_operation != "WRITE":
+                return "ERR unsupported benchmark operation"
             result = self._benchmark_suite.benchmark_hybrid_write(
                 self._storage,
                 self._mongo,

@@ -265,7 +265,37 @@ class CLIClient:
         status = "READY" if response == "PONG" else f"UNEXPECTED ({response})"
         color = self._GREEN if response == "PONG" else self._YELLOW
         self._emit(self._tone(f" status : {status}", color, bold=True))
+        mongo_status = self._fetch_mongo_status()
+        if mongo_status is not None:
+            self._emit(f" mongo  : {mongo_status}")
         self._emit("")
+
+    def _fetch_mongo_status(self) -> str | None:
+        try:
+            response = self._tcp_client.send({"name": "INFO", "args": ["MONGO"]})
+        except OSError:
+            return None
+
+        if not isinstance(response, str):
+            return None
+
+        fields: dict[str, str] = {}
+        for line in response.replace("\r\n", "\n").splitlines():
+            if ":" not in line or line.startswith("# "):
+                continue
+            key, value = line.split(":", 1)
+            fields[key] = value
+
+        if fields.get("enabled") != "True":
+            return "disabled (server-side config)"
+        if fields.get("connected") != "True":
+            return "enabled, disconnected"
+
+        database = fields.get("database")
+        collection = fields.get("collection")
+        if database and collection:
+            return f"connected ({database}.{collection})"
+        return "connected"
 
     def _print_help(self) -> None:
         self._emit(self._tone("Presenter Shortcuts", self._ACCENT, bold=True))

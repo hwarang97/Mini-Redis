@@ -6,6 +6,7 @@ import socket
 from dataclasses import dataclass
 from typing import Any
 
+from mini_redis.network.timing import wrap_timed_command
 from mini_redis.network.timing import unwrap_timed_response
 from mini_redis.protocol.resp import RespCodec
 from mini_redis.types import Command
@@ -26,11 +27,14 @@ class TCPClient:
         self._codec = codec
 
     def send(self, command: Command) -> Any:
-        return self.send_timed(command).value
+        with socket.create_connection((self._host, self._port)) as conn:
+            conn.sendall(self._codec.encode_command(command))
+            with conn.makefile("rb") as stream:
+                return self._codec.decode_response_stream(stream)
 
     def send_timed(self, command: Command) -> TimedResponse:
         with socket.create_connection((self._host, self._port)) as conn:
-            conn.sendall(self._codec.encode_command(command))
+            conn.sendall(self._codec.encode_command(wrap_timed_command(command)))
             with conn.makefile("rb") as stream:
                 payload = self._codec.decode_response_stream(stream)
 

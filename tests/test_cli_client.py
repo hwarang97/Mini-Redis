@@ -19,6 +19,17 @@ class _FakeTCPClient:
         self.commands.append(command)
         if command["name"] == "PING":
             return TimedResponse(value="PONG", server_time_ms=0.041)
+        if command["name"] == "INFO" and command["args"] == ["MONGO"]:
+            return TimedResponse(
+                value=(
+                    "# Mongo\r\n"
+                    "enabled:True\r\n"
+                    "connected:True\r\n"
+                    "database:mini_redis\r\n"
+                    "collection:kv_store"
+                ),
+                server_time_ms=0.044,
+            )
         if command["name"] == "SET":
             return TimedResponse(value="OK", server_time_ms=0.052)
         if command["name"] == "MGET":
@@ -62,6 +73,7 @@ class CLIClientTest(unittest.TestCase):
         self.assertIn("__  __ _       _", rendered)
         self.assertIn("Mini Redis Presentation CLI", rendered)
         self.assertIn("status : READY", rendered)
+        self.assertIn("mongo  : connected (mini_redis.kv_store)", rendered)
         self.assertIn("Presenter Shortcuts", rendered)
         self.assertIn("[ok | server 0.052 ms | round-trip 1.0 ms] OK", rendered)
         self.assertIn("[list | server 0.083 ms | round-trip 2.0 ms]", rendered)
@@ -88,6 +100,34 @@ class CLIClientTest(unittest.TestCase):
         rendered = "\n".join(outputs)
         self.assertIn("ERR invalid CLI input", rendered)
         self.assertIn("Session closed.", rendered)
+
+    def test_run_shows_disabled_mongo_as_server_side_config(self) -> None:
+        outputs: list[str] = []
+
+        class _DisabledMongoTCPClient(_FakeTCPClient):
+            def send_timed(self, command):
+                if command["name"] == "INFO" and command["args"] == ["MONGO"]:
+                    return TimedResponse(
+                        value="# Mongo\r\nenabled:False\r\nconnected:False",
+                        server_time_ms=0.044,
+                    )
+                return super().send_timed(command)
+
+        raw_inputs = iter([".exit"])
+        client = CLIClient(
+            tcp_client=_DisabledMongoTCPClient(),
+            codec=RespCodec(),
+            host="127.0.0.1",
+            port=6380,
+            input_func=lambda prompt: next(raw_inputs),
+            output_func=outputs.append,
+            use_color=False,
+        )
+
+        client.run()
+
+        rendered = "\n".join(outputs)
+        self.assertIn("mongo  : disabled (server-side config)", rendered)
 
 
 class CLIClientProbeModeTest(unittest.TestCase):

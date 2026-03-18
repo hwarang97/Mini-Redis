@@ -42,6 +42,16 @@ class MongoAdapter:
         )
         self.operations.append({"action": "upsert", "key": key, "value": value})
 
+    def get(self, key: str) -> str | None:
+        if not self.enabled:
+            return None
+        document = self._require_collection().find_one({"_id": key})
+        self.operations.append({"action": "get", "key": key})
+        if document is None:
+            return None
+        value = document.get("value")
+        return None if value is None else str(value)
+
     def delete(self, key: str) -> None:
         if not self.enabled:
             return

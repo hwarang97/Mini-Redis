@@ -26,6 +26,9 @@ class FakeCollection:
         if upsert or key in self.documents:
             self.documents[key] = {"_id": key, "value": value}
 
+    def find_one(self, criteria: dict[str, str]) -> dict[str, str] | None:
+        return self.documents.get(criteria["_id"])
+
     def delete_one(self, criteria: dict[str, str]) -> None:
         self.documents.pop(criteria["_id"], None)
 
@@ -69,12 +72,19 @@ class FakeMongoAdapter:
     def __init__(self) -> None:
         self.enabled = True
         self.calls: list[tuple[str, str | None]] = []
+        self.values: dict[str, str] = {}
 
     def upsert(self, key: str, value: str) -> None:
         self.calls.append(("upsert", key))
+        self.values[key] = value
+
+    def get(self, key: str) -> str | None:
+        self.calls.append(("get", key))
+        return self.values.get(key)
 
     def delete(self, key: str) -> None:
         self.calls.append(("delete", key))
+        self.values.pop(key, None)
 
     def clear(self) -> None:
         self.calls.append(("clear", None))
@@ -137,14 +147,15 @@ class MongoIntegrationTest(unittest.TestCase):
         manager = MongoManager(adapter)
 
         manager.maybe_sync("user:1", "hello")
+        self.assertEqual(manager.read_value("user:1"), "hello")
         manager.delete_key("user:1")
         manager.clear()
 
         self.assertEqual(
             adapter.calls,
-            [("upsert", "user:1"), ("delete", "user:1"), ("clear", None)],
+            [("upsert", "user:1"), ("get", "user:1"), ("delete", "user:1"), ("clear", None)],
         )
-        self.assertEqual(manager.info()["operation_count"], 3)
+        self.assertEqual(manager.info()["operation_count"], 4)
         self.assertIsNotNone(manager.info()["last_write_duration_seconds"])
 
     def test_redis_commands_sync_to_mongo_and_report_set_latency(self) -> None:
@@ -186,6 +197,8 @@ class MongoIntegrationTest(unittest.TestCase):
 
         redis_result = suite.benchmark_redis_set(storage, 5)
         mongo_result = suite.benchmark_mongo_write(mongo, 5)
+        redis_get_result = suite.benchmark_redis_get(storage, 5)
+        mongo_get_result = suite.benchmark_mongo_get(mongo, 5)
 
         self.assertEqual(redis_result.target, "redis")
         self.assertEqual(redis_result.operation, "set")
@@ -193,6 +206,12 @@ class MongoIntegrationTest(unittest.TestCase):
         self.assertEqual(mongo_result.target, "mongo")
         self.assertEqual(mongo_result.operation, "write")
         self.assertEqual(mongo_result.operations, 5)
+        self.assertEqual(redis_get_result.target, "redis")
+        self.assertEqual(redis_get_result.operation, "get")
+        self.assertEqual(redis_get_result.operations, 5)
+        self.assertEqual(mongo_get_result.target, "mongo")
+        self.assertEqual(mongo_get_result.operation, "get")
+        self.assertEqual(mongo_get_result.operations, 5)
 
     def test_benchmark_suite_measures_hybrid_storage_and_mongo_together(self) -> None:
         from mini_redis.storage.manager import StorageManager

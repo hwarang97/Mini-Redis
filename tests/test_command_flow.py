@@ -26,6 +26,9 @@ class _CommandFlowFakeCollection:
         if upsert or key in self.documents:
             self.documents[key] = {"_id": key, "value": value}
 
+    def find_one(self, criteria: dict[str, str]) -> dict[str, str] | None:
+        return self.documents.get(criteria["_id"])
+
     def delete_one(self, criteria: dict[str, str]) -> None:
         self.documents.pop(criteria["_id"], None)
 
@@ -241,6 +244,38 @@ class CommandFlowTest(unittest.TestCase):
         self.assertIn("target:redis", payload)
         self.assertIn("storage.latency.max_us:", payload)
         self.assertIn("storage.is_rehashing:", payload)
+
+    def test_benchmark_redis_get_reports_latency_summary(self) -> None:
+        manager = self.build_manager()
+
+        payload = manager.execute({"name": "BENCHMARK", "args": ["REDIS", "GET", "8", "KEEP"]})
+
+        self.assertIn("# Benchmark", payload)
+        self.assertIn("target:redis", payload)
+        self.assertIn("operation:get", payload)
+        self.assertIn("storage.latency.max_us:", payload)
+
+    def test_benchmark_mongo_get_reports_latency_summary(self) -> None:
+        manager = build_command_manager(
+            appendonly_path=self.appendonly_path,
+            snapshot_path=self.snapshot_path,
+            metadata_path=self.metadata_path,
+            mongo_enabled=True,
+            mongo_uri="mongodb://127.0.0.1:27017",
+            mongo_db="mini_redis",
+            mongo_collection="kv_store",
+            mongo_client_factory=lambda uri, serverSelectionTimeoutMS: _CommandFlowFakeMongoClient(
+                uri,
+                serverSelectionTimeoutMS,
+            ),
+        )
+
+        payload = manager.execute({"name": "BENCHMARK", "args": ["MONGO", "GET", "8"]})
+
+        self.assertIn("# Benchmark", payload)
+        self.assertIn("target:mongo", payload)
+        self.assertIn("operation:get", payload)
+        self.assertIn("mongo.operation_count:", payload)
 
     def test_probe_set_reports_request_latency_and_resize_state(self) -> None:
         manager = self.build_manager()

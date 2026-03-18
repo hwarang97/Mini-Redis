@@ -51,6 +51,7 @@
 | --- | --- | --- | --- |
 | `INFO` | `INFO PERSISTENCE` | 포맷된 문자열 | persistence 메타데이터, 키 개수, 복구 정책, 백그라운드 작업 상태를 포함합니다. |
 | `INFO` | `INFO MONGO` | 딕셔너리 | Mongo 동기화 상태, 연결 메타데이터, 마지막 write 시간 정보를 포함합니다. |
+| `BENCHMARK` | `BENCHMARK <target> [SET\|GET\|WRITE] <count> [KEEP]` | 요약 문자열 | `REDIS`는 `SET`/`GET`, `MONGO`는 `WRITE`/`GET`, `HYBRID`는 `WRITE`를 측정합니다. 기존 `BENCHMARK REDIS <count>` 형식도 계속 동작합니다. |
 | `CONFIG` | `CONFIG GET <key>` | 평탄한 리스트 또는 에러 문자열 | `CONFIG GET *`를 사용하면 지원되는 런타임 설정 전체를 조회할 수 있습니다. |
 | `CONFIG` | `CONFIG SET <key> <value>` | `OK` 또는 에러 문자열 | 지원되는 런타임 설정 값을 변경합니다. |
 

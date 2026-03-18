@@ -29,6 +29,11 @@ class MongoManager:
         self._last_write_duration_seconds = elapsed
         return elapsed
 
+    def read_value(self, key: str) -> str | None:
+        if not self.enabled:
+            return None
+        return self._adapter.get(key)
+
     def sync_value(self, key: str, value: str) -> float | None:
         # Compatibility shim for older code paths that still call the previous sync-oriented API.
         return self.write_value(key, value)
