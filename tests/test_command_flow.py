@@ -351,6 +351,17 @@ class CommandFlowTest(unittest.TestCase):
                 recovery_policy="strict",
             )
 
+    def test_keys_sweeps_expired_entries_before_listing(self) -> None:
+        # This makes sure a full key listing purges expired entries before returning.
+        manager = self.build_manager()
+
+        manager.execute({"name": "SET", "args": ["live", "1"]})
+        manager.execute({"name": "SET", "args": ["soon:gone", "1", "EX", "1"]})
+
+        time.sleep(1.1)
+
+        self.assertEqual(manager.execute({"name": "KEYS", "args": []}), ["live"])
+
 
 if __name__ == "__main__":
     unittest.main()
