@@ -28,7 +28,6 @@ from mini_redis.commands.manager import CommandManager
 from mini_redis.config import APPEND_ONLY_FILE, DEFAULT_RECOVERY_POLICY, PERSISTENCE_META_FILE, SNAPSHOT_FILE
 from mini_redis.engine.redis import Redis
 from mini_redis.persistence.aof import AOFWriter
-from mini_redis.persistence.invalidation import InvalidationManager
 from mini_redis.persistence.manager import PersistenceManager
 from mini_redis.persistence.meta import PersistenceMetadataStore
 from mini_redis.persistence.rdb import RDBSnapshotStore
@@ -51,13 +50,11 @@ def build_command_manager(
         metadata_store=PersistenceMetadataStore(metadata_path or PERSISTENCE_META_FILE),
         recovery_policy=recovery_policy or DEFAULT_RECOVERY_POLICY,
     )
-    invalidation = InvalidationManager()
     mongo = MongoAdapter(enabled=False)
     redis = Redis(
         storage=storage,
         ttl=ttl,
         persistence=persistence,
-        invalidation=invalidation,
         mongo=mongo,
     )
     # Register Redis-owned work so persistence can trigger background jobs without breaking boundaries.

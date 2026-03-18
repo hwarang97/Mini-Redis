@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from mini_redis.persistence.invalidation import InvalidationManager
 from mini_redis.persistence.manager import PersistenceManager
 from mini_redis.storage.manager import StorageManager
 from mini_redis.storage.mongo_adapter import MongoAdapter
@@ -19,13 +18,11 @@ class Redis:
         storage: StorageManager,
         ttl: TTLManager,
         persistence: PersistenceManager,
-        invalidation: InvalidationManager,
         mongo: MongoAdapter,
     ) -> None:
         self._storage = storage
         self._ttl = ttl
         self._persistence = persistence
-        self._invalidation = invalidation
         self._mongo = mongo
 
     def ping(self) -> str:
@@ -39,7 +36,6 @@ class Redis:
         self._storage.set(key, value)
         self._ttl.set_expiration(key, ttl_seconds)
         self._persistence.append("SET", key, value, ttl_seconds)
-        self._invalidation.notify(key)
         self._mongo.maybe_sync(key, value)
         return "OK"
 
@@ -47,8 +43,6 @@ class Redis:
         self._ttl.clear_expiration(key)
         deleted = 1 if self._storage.delete(key) else 0
         self._persistence.append("DELETE", key)
-        if deleted:
-            self._invalidation.notify(key)
         return deleted
 
     def exists(self, key: str) -> int:
@@ -85,7 +79,6 @@ class Redis:
 
         self._storage.set(key, str(next_value))
         self._persistence.append("INCR", key)
-        self._invalidation.notify(key)
         self._mongo.maybe_sync(key, str(next_value))
         return next_value
 
