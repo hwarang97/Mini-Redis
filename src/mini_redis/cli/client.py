@@ -12,6 +12,7 @@ from typing import Callable
 from mini_redis.cli.parser import parse_cli_command
 from mini_redis.cli.parser import parse_cli_meta_command
 from mini_redis.network.tcp_client import TCPClient
+from mini_redis.network.tcp_client import TimedResponse
 from mini_redis.protocol.resp import RespCodec
 from mini_redis.types import Command
 
@@ -128,13 +129,25 @@ class CLIClient:
     def _run_server_command(self, command: Command) -> bool:
         try:
             started = self._clock()
-            response = self._tcp_client.send(command)
-            elapsed_ms = (self._clock() - started) * 1000
+            if hasattr(self._tcp_client, "send_timed"):
+                timed_response = self._tcp_client.send_timed(command)
+            else:
+                timed_response = TimedResponse(
+                    value=self._tcp_client.send(command),
+                    server_time_ms=None,
+                )
+            round_trip_ms = (self._clock() - started) * 1000
         except OSError as exc:
             self._emit(self._format_error(f"ERR connection failed: {exc}"))
             return command["name"] != "QUIT"
 
-        self._emit(self._render_response(response, elapsed_ms))
+        self._emit(
+            self._render_response(
+                timed_response.value,
+                round_trip_ms=round_trip_ms,
+                server_time_ms=timed_response.server_time_ms,
+            )
+        )
         return command["name"] != "QUIT"
 
     def _print_banner(self) -> None:
@@ -203,7 +216,12 @@ class CLIClient:
     def _build_prompt(self) -> str:
         return self._tone(f"mini-redis[{self._prompt_index:02d}]> ", self._ACCENT, bold=True)
 
-    def _render_response(self, value: Any, elapsed_ms: float) -> str:
+    def _render_response(
+        self,
+        value: Any,
+        round_trip_ms: float,
+        server_time_ms: float | None = None,
+    ) -> str:
         label = "ok"
         color = self._GREEN
         if isinstance(value, str) and value.startswith("ERR "):
@@ -216,11 +234,21 @@ class CLIClient:
             label = "list"
             color = self._YELLOW
 
-        header = self._tone(f"[{label} | {elapsed_ms:.1f} ms]", color, bold=True)
+        timing_parts = []
+        if server_time_ms is not None:
+            timing_parts.append(f"server {self._format_timing_ms(server_time_ms)}")
+        timing_parts.append(f"round-trip {self._format_timing_ms(round_trip_ms)}")
+        header = self._tone(f"[{label} | {' | '.join(timing_parts)}]", color, bold=True)
         body_lines = self._format_value_lines(value)
         if len(body_lines) == 1:
             return f"{header} {body_lines[0]}"
         return "\n".join([header, *body_lines])
+
+    @staticmethod
+    def _format_timing_ms(value: float) -> str:
+        if value >= 1:
+            return f"{value:.1f} ms"
+        return f"{value:.3f} ms"
 
     def _format_value_lines(self, value: Any, indent: str = "") -> list[str]:
         if isinstance(value, list):
