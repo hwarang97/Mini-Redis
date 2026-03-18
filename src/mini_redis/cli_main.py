@@ -11,7 +11,7 @@ from mini_redis.protocol.resp import RespCodec
 def main() -> None:
     codec = RespCodec()
     client = TCPClient(host=HOST, port=PORT, codec=codec)
-    CLIClient(tcp_client=client, codec=codec).run()
+    CLIClient(tcp_client=client, codec=codec, host=HOST, port=PORT).run()
 
 
 if __name__ == "__main__":
