@@ -86,6 +86,39 @@ class TcpRoundTripTest(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=1)
 
+    def test_server_keeps_connection_open_for_multiple_commands(self) -> None:
+        try:
+            server = TCPServer(
+                host="127.0.0.1",
+                port=6393,
+                manager=build_command_manager(
+                    appendonly_path=self.appendonly_path,
+                    snapshot_path=self.snapshot_path,
+                ),
+                codec=RespCodec(),
+            )
+        except PermissionError as exc:
+            if exc.errno == errno.EPERM:
+                self.skipTest("sandbox blocks local TCP bind")
+            raise
+
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        codec = RespCodec()
+        try:
+            with socket.create_connection(("127.0.0.1", 6393)) as conn:
+                with conn.makefile("rb") as stream:
+                    conn.sendall(codec.encode_command({"name": "PING", "args": []}))
+                    self.assertEqual(codec.decode_response_stream(stream), "PONG")
+
+                    conn.sendall(codec.encode_command({"name": "GET", "args": ["missing"]}))
+                    self.assertIsNone(codec.decode_response_stream(stream))
+        finally:
+            server.shutdown()
+            thread.join(timeout=1)
+
 
 if __name__ == "__main__":
     unittest.main()
