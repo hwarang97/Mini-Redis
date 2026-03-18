@@ -19,8 +19,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             try:
                 # self.rfile은 StreamRequestHandler가 제공하는 바이너리 입력 스트림이다.
                 # decode_command_stream(...)은 한 줄짜리 JSON이 아니라, 여러 줄에 걸친 RESP 프레임 전체를 끝까지 읽을 수 있다.
+                # 충돌 정리: 기존의 상세 RESP 설명은 유지하고, dev 브랜치의 "연결 종료(OSError)/QUIT 처리"도 함께 반영한다.
                 command = self.codec.decode_command_stream(self.rfile)
-            except ValueError:
+            except (OSError, ValueError):
                 # 잘못되었거나 중간에 끊긴 프레임, 혹은 클라이언트 종료는 transport 레벨에서 조용히 끝낸다.
                 return
             # 한 연결에서 여러 명령을 연속 처리할 수 있게 loop를 유지한다.
@@ -32,6 +33,9 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             # encode_response(...)는 실행 결과를 RESP bytes로 바꿔 클라이언트에 다시 써 준다.
             self.wfile.write(self.codec.encode_response(response))
             self.wfile.flush()
+            # dev 브랜치의 종료 규칙을 유지해서 QUIT 응답 전송 후 연결을 깔끔하게 닫는다.
+            if command["name"] == "QUIT":
+                return
 
 
 class ThreadedTCPServer(socketserver.ThreadingTCPServer):
