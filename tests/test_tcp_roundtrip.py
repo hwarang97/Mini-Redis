@@ -1,4 +1,5 @@
 import errno
+import socket
 import threading
 import time
 import unittest
@@ -46,6 +47,41 @@ class TcpRoundTripTest(unittest.TestCase):
             self.assertEqual(client.send({"name": "PING", "args": []}), "PONG")
             self.assertEqual(client.send({"name": "SET", "args": ["smoke", "ok"]}), "OK")
             self.assertEqual(client.send({"name": "GET", "args": ["smoke"]}), "ok")
+        finally:
+            server.shutdown()
+            thread.join(timeout=1)
+
+    def test_server_accepts_multiline_resp_frames(self) -> None:
+        try:
+            server = TCPServer(
+                host="127.0.0.1",
+                port=6392,
+                manager=build_command_manager(),
+                codec=RespCodec(),
+            )
+        except PermissionError as exc:
+            if exc.errno == errno.EPERM:
+                self.skipTest("sandbox blocks local TCP bind")
+            raise
+
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        time.sleep(0.1)
+
+        codec = RespCodec()
+        try:
+            with socket.create_connection(("127.0.0.1", 6392)) as conn:
+                conn.sendall(codec.encode_command({"name": "SET", "args": ["resp:key", "value"]}))
+                with conn.makefile("rb") as stream:
+                    self.assertEqual(codec.decode_response_stream(stream), "OK")
+
+            with socket.create_connection(("127.0.0.1", 6392)) as conn:
+                payload = codec.encode_command({"name": "GET", "args": ["resp:key"]})
+                midpoint = len(payload) // 2
+                conn.sendall(payload[:midpoint])
+                conn.sendall(payload[midpoint:])
+                with conn.makefile("rb") as stream:
+                    self.assertEqual(codec.decode_response_stream(stream), "value")
         finally:
             server.shutdown()
             thread.join(timeout=1)

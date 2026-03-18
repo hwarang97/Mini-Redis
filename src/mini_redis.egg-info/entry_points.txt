@@ -1,0 +1,3 @@
+[console_scripts]
+mini-redis-cli = mini_redis.cli_main:main
+mini-redis-server = mini_redis.server_main:main
