@@ -15,15 +15,18 @@ AOF/RDB 스타일 persistence, 복구 정책, storage inspection과 benchmarking
 
 ### 핵심 키워드
 
+- `Server / Client`
 - `RESP`
 - `TCP Server / Client`
+- `Command Queue`
 - `CommandManager`
-- `CommandQueue`
+- `Storage Engine`
 - `TTL`
 - `Tag-based Invalidation`
 - `AOF / Snapshot`
 - `Recovery Policy`
 - `Incremental Rehashing`
+- `MongoDB Manager`
 
 ## 2. Features At A Glance
 
@@ -65,169 +68,59 @@ AOF/RDB 스타일 persistence, 복구 정책, storage inspection과 benchmarking
 
 ![Mini Redis Architecture](docs/architecture.png)
 
-### 역할 분리
+## 5. Presentation Materials
 
-- CLI는 입력과 출력 UX를 담당합니다.
-- RESP Codec은 명령과 응답을 네트워크 바이트 포맷으로 변환합니다.
-- TCP 계층은 transport만 담당합니다.
-- `CommandManager`는 명령 정규화와 실행 순서를 담당합니다.
-- `CommandQueue`는 동시 요청을 FIFO 순서로 직렬화합니다.
-- Redis Engine은 비즈니스 로직을 수행합니다.
-- 각 Manager는 storage, ttl, invalidation, persistence 역할을 분리해서 담당합니다.
+### 5-1. 서버 - 클라이언트
 
-### 요청 처리 흐름
+- 클라이언트는 사용자의 명령을 입력받아 RESP 형식으로 인코딩한 뒤 TCP로 서버에 전송합니다.
+- 서버는 RESP 요청을 해석하고 `CommandManager`에 전달한 뒤, 실행 결과를 다시 RESP 응답으로 반환합니다.
+- 네트워크 계층은 transport 역할만 담당하고, 실제 명령 실행은 상위 계층에 위임합니다.
 
-1. 사용자가 CLI에 명령을 입력합니다.
-2. CLI Parser가 입력을 명령 형식으로 정리합니다.
-3. Client RespCodec이 명령을 RESP 포맷으로 인코딩합니다.
-4. TCP Client가 서버로 요청을 전송합니다.
-5. TCP Server와 Server RespCodec이 요청을 해석합니다.
-6. `CommandQueue`가 명령 실행 순서를 제어합니다.
-7. Mini Redis Engine이 각 하위 매니저에 작업을 위임합니다.
-8. 실행 결과는 다시 RESP 응답으로 인코딩되어 CLI로 돌아옵니다.
-9. CLI Renderer가 결과를 사람이 읽기 쉬운 형태로 출력합니다.
+### 5-2. 커맨드 큐
 
-## 5. Core Components
+- 여러 요청이 동시에 들어와도 `CommandQueue`가 모든 명령을 FIFO 순서로 직렬 실행합니다.
+- storage, ttl, invalidation, persistence 같은 공유 상태를 안전하게 관리하기 위한 구조입니다.
+- throughput보다 데이터 정합성과 예측 가능한 실행 순서를 우선합니다.
 
-### 5-1. Command Flow
+### 5-3. 커맨드 매니저
 
-1. 사용자가 CLI에서 명령을 입력합니다.
-2. 명령은 RESP 배열 형식으로 인코딩됩니다.
-3. TCP 서버가 명령을 수신하고 `CommandManager`에 전달합니다.
-4. `CommandManager`는 명령을 정규화한 뒤 `CommandQueue`에 전달합니다.
-5. `CommandQueue`는 FIFO 순서로 하나씩 실행합니다.
-6. Redis Engine이 실제 로직을 수행합니다.
-7. 결과는 RESP 응답으로 인코딩되어 클라이언트로 반환됩니다.
+- `CommandManager`는 서버 명령의 단일 진입점입니다.
+- 들어온 명령을 정규화하고 적절한 handler로 라우팅합니다.
+- 모든 명령이 동일한 경로를 통과하기 때문에 테스트, 디버깅, 로깅, 복구 흐름을 일관되게 유지할 수 있습니다.
 
-### 5-2. Command Queue And Bottleneck Handling
+### 5-4. Storage Engine (Hash Table, Incremental Rehashing)
 
-Mini Redis는 여러 요청이 동시에 들어오더라도 공유 상태를 안전하게 유지하기 위해
-모든 명령 실행을 `CommandQueue`를 통해 직렬화합니다.
+- 메인 저장소는 in-memory hash table 기반의 key-value store입니다.
+- load factor가 임계치를 넘으면 더 큰 테이블을 만들고, 각 요청마다 bucket을 조금씩 옮기는 incremental rehashing으로 확장합니다.
+- resize 비용을 한 번에 몰지 않고 분산시켜 응답 지연을 줄이는 것이 핵심입니다.
+- `INSPECT STORAGE`, `PROBE` 를 통해 rehash 진행 상태와 latency를 관찰할 수 있습니다.
 
-- 각 요청은 queue에 ticket 형태로 들어갑니다.
-- queue의 맨 앞 요청만 실행 권한을 가집니다.
-- 나머지 요청은 대기 상태로 유지됩니다.
-- 현재 실행이 끝나면 다음 요청이 FIFO 순서로 실행됩니다.
+### 5-5. TTL Manager
 
-이 구조는 병목을 없애기보다는, 병목을 예측 가능하고 안전한 대기열로 바꾸는 방식입니다.
+- key의 만료 시각을 별도 구조로 관리합니다.
+- `EXPIRE` 로 TTL을 설정하고 `TTL` 로 남은 시간을 조회합니다.
+- 조회 전에 만료 여부를 확인해 expired key를 자동 정리합니다.
+- 값 저장과 만료 정책을 분리해 책임을 명확하게 나눴습니다.
 
-#### 장점
+### 5-6. Invalidation Manager
 
-- 여러 스레드가 storage, ttl, persistence, invalidation 상태를 동시에 변경하지 않도록 막습니다.
-- race condition 대신 FIFO 순서의 일관된 실행 흐름을 보장합니다.
-- 명령 실행 순서를 추적하기 쉽고 디버깅이 단순합니다.
-- `queued_commands`, `active_command`, `processed_commands` 같은 상태를 확인할 수 있습니다.
+- tag 기반 secondary index를 관리합니다.
+- `SET ... TAGS ...` 로 key와 tag를 연결하고, `INVALIDATE <tag>` 로 관련 key를 한 번에 제거합니다.
+- key 삭제, 만료, 복구 시 tag index도 함께 정리해 stale reference를 방지합니다.
+- 여러 key를 하나의 그룹처럼 관리할 수 있도록 만든 캐시 무효화 계층입니다.
 
-#### Trade-off
+### 5-7. Persistence Manager
 
-- 앞선 명령이 오래 걸리면 뒤의 명령도 함께 대기하게 됩니다.
-- 즉, throughput 최적화보다는 데이터 정합성과 예측 가능한 실행 순서를 우선한 구조입니다.
+- 메모리 상태를 파일로 저장하고 재시작 후 복구하는 계층입니다.
+- AOF는 명령 로그를 순차적으로 기록하고, snapshot은 현재 상태를 한 번에 저장합니다.
+- 부팅 시 recovery policy에 따라 snapshot을 복원하고, snapshot 이후의 AOF tail을 replay합니다.
+- `SAVE`, `BGSAVE`, `REWRITEAOF`, `REPAIRAOF`, `INFO PERSISTENCE` 등으로 persistence 상태를 관리합니다.
 
-### 5-3. Storage
+### 5-8. MongoDB Manager
 
-- in-memory Key-Value 저장소입니다.
-- 내부 해시 테이블은 incremental rehashing 방식으로 확장됩니다.
-- `KEYS`, `DUMPALL`, `MGET` 등 조회 명령을 지원합니다.
-- `INSPECT STORAGE` 를 통해 현재 테이블 크기, rehash 상태, 최근 요청 시간을 볼 수 있습니다.
-
-### 5-4. TTL
-
-- `EXPIRE <key> <seconds>` 로 만료 시간을 설정합니다.
-- `TTL <key>` 로 남은 시간을 조회합니다.
-- 조회나 목록 출력 전에 만료된 key를 자동 정리합니다.
-
-### 5-5. Tag-based Invalidation
-
-- `SET ... TAGS <tag> ...` 로 key를 태그에 연결할 수 있습니다.
-- `INVALIDATE <tag>` 는 같은 태그에 속한 key를 한 번에 제거합니다.
-- key 삭제, 만료, restore 시에도 태그 인덱스를 함께 정리합니다.
-
-### 5-6. Inspection And Diagnostics
-
-Storage 내부 상태와 rehash 진행도를 관찰하기 위한 기능입니다.
-
-- `INSPECT STORAGE`
-  - 현재 storage 상태를 한 줄 요약으로 출력합니다.
-- `INSPECT STORAGE FULL`
-  - bucket layout과 item map까지 포함한 상세 상태를 출력합니다.
-- `INSPECT STORAGE RESET`
-  - 최근 진단 기록과 rehash 카운터를 초기화합니다.
-- `INSPECT STORAGE RUN <count>`
-  - synthetic insert를 연속 실행하며 요청별 상태를 출력합니다.
-- `INSPECT STORAGE UPDATE <count>`
-  - 기존 synthetic key들을 다시 수정하며 요청별 상태를 출력합니다.
-- `PROBE SET <key> <value>`
-  - 단일 삽입 요청 1회를 수행하고 latency와 storage 상태를 반환합니다.
-- `PROBE UPDATE <key> <value>`
-  - 단일 수정 요청 1회를 수행하고 latency와 storage 상태를 반환합니다.
-
-### 5-7. Benchmark
-
-서로 다른 저장 경로의 쓰기 비용을 비교하기 위한 기능입니다.
-
-- `BENCHMARK REDIS <count> [KEEP]`
-  - in-memory Redis 쓰기 성능을 측정합니다.
-- `BENCHMARK MONGO <count> [KEEP]`
-  - Mongo 쓰기 성능을 측정합니다.
-- `BENCHMARK HYBRID <count> [KEEP]`
-  - Redis와 Mongo에 동시에 쓰는 경로를 측정합니다.
-
-응답에는 elapsed time, throughput, backend-specific details가 포함됩니다.
-
-### 5-8. Persistence
-
-- `SAVE`, `BGSAVE` 로 snapshot을 저장합니다.
-- `REWRITEAOF`, `BGREWRITEAOF` 로 현재 live state 기준 AOF를 다시 생성합니다.
-- `LOAD` 로 snapshot을 다시 읽어 상태를 복원합니다.
-- `REPAIRAOF` 로 손상된 AOF tail을 잘라냅니다.
-- `FLUSHDB` 로 메모리 상태와 관련 메타데이터를 초기화합니다.
-
-### 5-9. Recovery
-
-지원하는 복구 정책:
-
-- `best-effort`
-- `snapshot-first`
-- `aof-only`
-- `strict`
-
-기본 복구 흐름:
-
-1. snapshot이 있으면 먼저 로드합니다.
-2. snapshot 이후의 AOF tail만 replay합니다.
-3. corruption 정책에 따라 손상된 tail을 무시하거나 기동을 실패 처리합니다.
-
-### 5-10. Observability
-
-- `INFO PERSISTENCE`
-  - snapshot / AOF / metadata 상태
-  - background task 상태
-  - recovery 결과
-  - key count
-- `INFO MONGO`
-  - Mongo 연결 여부와 관련 메타데이터
-- `CONFIG GET`, `CONFIG SET`
-  - `recovery_policy`
-  - `fsync_policy`
-  - `autosave_interval`
-  - `autorewrite_min_operations`
-
-### 5-11. CLI UX
-
-- CLI 시작 시 ASCII 배너와 연결 상태를 표시합니다.
-- 응답 타입별 포맷팅과 server time / round-trip time을 출력합니다.
-- 다음 로컬 helper를 제공합니다.
-
-```text
-.help
-.demo
-.clear
-.exit
-WATCH <interval> <count> <command...>
-LIVESET <count> [interval] [key_prefix]
-```
-
-이 helper들은 서버 명령이 아니라 CLI 내부에서 처리됩니다.
+- MongoDB 연동을 위한 확장 경계 계층입니다.
+- 연결 정보, upsert/delete/clear, `INFO MONGO`, `BENCHMARK MONGO`, `BENCHMARK HYBRID` 를 제공합니다.
+- 현재는 기본 Redis 명령 경로에서 자동 write-through 하지는 않으며, 외부 저장소 확장 포인트로 설계되어 있습니다.
 
 ## 6. Usage Examples
 
