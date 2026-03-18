@@ -10,6 +10,7 @@ Python skeleton for a collaborative Mini Redis project with explicit module boun
 - Modular managers for storage, TTL, persistence, invalidation, and Mongo integration
 - File-backed AOF/RDB skeleton under `data/`
 - JSON metadata file for persistence lifecycle under `data/`
+- Optional MongoDB write-through sync via `MongoManager -> MongoAdapter`
 
 ## Quick start
 
@@ -41,6 +42,7 @@ SET user:1:posts posts EX 60 TAGS user:1 feed
 GET user:1
 INVALIDATE user:1
 INFO PERSISTENCE
+INFO MONGO
 MGET user:1 user:2
 EXISTS user:1
 INCR counter
@@ -69,3 +71,30 @@ Runtime config keys:
 - `fsync_policy`
 - `autosave_interval`
 - `autorewrite_min_operations`
+
+## MongoDB sync
+
+Mini Redis keeps in-memory storage as the primary runtime state and can optionally
+sync write operations to MongoDB. The sync path is:
+
+`Redis -> MongoManager -> MongoAdapter -> MongoDB`
+
+Enable MongoDB sync with environment variables before starting the server:
+
+```bash
+export MINI_REDIS_MONGO_ENABLED=1
+export MINI_REDIS_MONGO_URI="mongodb://127.0.0.1:27017"
+export MINI_REDIS_MONGO_DB="mini_redis"
+export MINI_REDIS_MONGO_COLLECTION="kv_store"
+mini-redis-server
+```
+
+Project defaults:
+
+- `MINI_REDIS_MONGO_URI`: `mongodb://127.0.0.1:27017`
+- `MINI_REDIS_MONGO_DB`: `mini_redis`
+- `MINI_REDIS_MONGO_COLLECTION`: `kv_store`
+- `MINI_REDIS_MONGO_SERVER_SELECTION_TIMEOUT_MS`: `2000`
+
+When enabled, `SET`, `INCR`, `DELETE`, and `FLUSHDB` will sync to MongoDB and
+`INFO MONGO` will show connection and collection metadata.

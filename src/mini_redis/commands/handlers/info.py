@@ -13,7 +13,7 @@ class InfoHandler(BaseHandler):
             return "ERR wrong number of arguments for 'INFO'"
 
         section = args[0].upper()
-        if section != "PERSISTENCE":
+        if section not in {"PERSISTENCE", "MONGO"}:
             return "ERR unsupported INFO section"
 
         return self.redis.info(section)

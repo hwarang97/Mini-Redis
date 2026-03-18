@@ -7,7 +7,7 @@ name = "mini-redis"
 version = "0.1.0"
 description = "A minimal Redis-like server with CLI, TCP, RESP, and modular command routing."
 requires-python = ">=3.9"
-dependencies = []
+dependencies = ["pymongo>=4.6"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

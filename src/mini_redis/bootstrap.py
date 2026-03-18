@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from mini_redis.commands.handlers.bgrewriteaof import BGRewriteAOFHandler
 from mini_redis.commands.handlers.bgsave import BGSaveHandler
@@ -26,7 +27,17 @@ from mini_redis.commands.handlers.save import SaveHandler
 from mini_redis.commands.handlers.set import SetHandler
 from mini_redis.commands.handlers.ttl import TTLHandler
 from mini_redis.commands.manager import CommandManager
-from mini_redis.config import APPEND_ONLY_FILE, DEFAULT_RECOVERY_POLICY, PERSISTENCE_META_FILE, SNAPSHOT_FILE
+from mini_redis.config import (
+    APPEND_ONLY_FILE,
+    DEFAULT_RECOVERY_POLICY,
+    MONGO_COLLECTION,
+    MONGO_DB,
+    MONGO_ENABLED,
+    MONGO_SERVER_SELECTION_TIMEOUT_MS,
+    MONGO_URI,
+    PERSISTENCE_META_FILE,
+    SNAPSHOT_FILE,
+)
 from mini_redis.engine.redis import Redis
 from mini_redis.invalidation.manager import InvalidationManager
 from mini_redis.persistence.aof import AOFWriter
@@ -35,6 +46,7 @@ from mini_redis.persistence.meta import PersistenceMetadataStore
 from mini_redis.persistence.rdb import RDBSnapshotStore
 from mini_redis.storage.manager import StorageManager
 from mini_redis.storage.mongo_adapter import MongoAdapter
+from mini_redis.storage.mongo_manager import MongoManager
 from mini_redis.storage.ttl import TTLManager
 
 
@@ -43,6 +55,12 @@ def build_command_manager(
     snapshot_path: Path | None = None,
     metadata_path: Path | None = None,
     recovery_policy: str | None = None,
+    mongo_enabled: bool | None = None,
+    mongo_uri: str | None = None,
+    mongo_db: str | None = None,
+    mongo_collection: str | None = None,
+    mongo_server_selection_timeout_ms: int | None = None,
+    mongo_client_factory: Any | None = None,
 ) -> CommandManager:
     storage = StorageManager()
     ttl = TTLManager()
@@ -55,7 +73,22 @@ def build_command_manager(
         metadata_store=PersistenceMetadataStore(metadata_path or PERSISTENCE_META_FILE),
         recovery_policy=recovery_policy or DEFAULT_RECOVERY_POLICY,
     )
-    mongo = MongoAdapter(enabled=False)
+    mongo = MongoManager(
+        MongoAdapter(
+            enabled=MONGO_ENABLED if mongo_enabled is None else mongo_enabled,
+            uri=MONGO_URI if mongo_uri is None else mongo_uri,
+            database=MONGO_DB if mongo_db is None else mongo_db,
+            collection=MONGO_COLLECTION
+            if mongo_collection is None
+            else mongo_collection,
+            server_selection_timeout_ms=(
+                MONGO_SERVER_SELECTION_TIMEOUT_MS
+                if mongo_server_selection_timeout_ms is None
+                else mongo_server_selection_timeout_ms
+            ),
+            client_factory=mongo_client_factory,
+        )
+    )
     redis = Redis(
         storage=storage,
         ttl=ttl,
