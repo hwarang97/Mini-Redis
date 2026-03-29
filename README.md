@@ -9,6 +9,8 @@ Mini Redis는 Redis의 핵심 동작을 Python으로 재구성한 미니 서버 
 AOF/RDB 스타일 persistence, 복구 정책, storage inspection과 benchmarking까지 포함해
 서버 내부 구조를 계층적으로 구현했습니다.
 
+구현 내용은 블로그(https://velog.io/@dolggul2/WEEK3-WIL)에 기록해두었습니다.
+
 ## Actual Screen
 
 아래 화면은 Mini Redis 서버에 연결된 CLI 메인 화면입니다.
