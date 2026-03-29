@@ -2,6 +2,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.pyc
+*.egg-info/
 data/*.aof
 data/*.json
 !data/.gitkeep

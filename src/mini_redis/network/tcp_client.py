@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import socket
+from dataclasses import dataclass
 from typing import Any
 
+from mini_redis.network.timing import wrap_timed_command
+from mini_redis.network.timing import unwrap_timed_response
 from mini_redis.protocol.resp import RespCodec
 from mini_redis.types import Command
+
+
+@dataclass(frozen=True)
+class TimedResponse:
+    value: Any
+    server_time_ms: float | None
 
 
 class TCPClient:
@@ -20,15 +29,14 @@ class TCPClient:
     def send(self, command: Command) -> Any:
         with socket.create_connection((self._host, self._port)) as conn:
             conn.sendall(self._codec.encode_command(command))
-            payload = self._recv_line(conn)
-        return self._codec.decode_response(payload)
+            with conn.makefile("rb") as stream:
+                return self._codec.decode_response_stream(stream)
 
-    @staticmethod
-    def _recv_line(conn: socket.socket) -> bytes:
-        chunks = bytearray()
-        while not chunks.endswith(b"\n"):
-            data = conn.recv(4096)
-            if not data:
-                break
-            chunks.extend(data)
-        return bytes(chunks)
+    def send_timed(self, command: Command) -> TimedResponse:
+        with socket.create_connection((self._host, self._port)) as conn:
+            conn.sendall(self._codec.encode_command(wrap_timed_command(command)))
+            with conn.makefile("rb") as stream:
+                payload = self._codec.decode_response_stream(stream)
+
+        value, server_time_ms = unwrap_timed_response(payload)
+        return TimedResponse(value=value, server_time_ms=server_time_ms)
